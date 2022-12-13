@@ -32,8 +32,8 @@ class CtxCLIPTextModel(CLIPPreTrainedModel):
 
     def forward(
         self,
-        ctx_embeddings: torch.Tensor,
-        ctx_begin_pos: int,
+        ctx_embeddings: torch.Tensor = None,
+        ctx_begin_pos: int = None,
         input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
@@ -122,7 +122,8 @@ class CtxCLIPTextTransformer(nn.Module):
         )
 
         bsz, seq_len = input_shape
-        seq_len += ctx_embeddings.size(1)
+        if ctx_embeddings is not None:
+            seq_len += ctx_embeddings.size(1)
         # CLIP's text model uses causal mask, prepare it here.
         # https://github.com/openai/CLIP/blob/cfcffb90e69f37bf2ff1e988237a0fbe41f33c04/clip/model.py#L324
         causal_attention_mask = self._build_causal_attention_mask(
@@ -197,7 +198,10 @@ class CtxCLIPTextEmbeddings(nn.Module):
         inputs_embeds: Optional[torch.FloatTensor] = None,
     ) -> torch.Tensor:
 
-        ctx_len = ctx_embeddings.shape[1]
+        if ctx_embeddings is None:
+            ctx_len = 0
+        else:
+            ctx_len = ctx_embeddings.shape[1]
 
         seq_length = (
             input_ids.shape[-1] if input_ids is not None else inputs_embeds.shape[-2]
@@ -208,11 +212,13 @@ class CtxCLIPTextEmbeddings(nn.Module):
 
         if inputs_embeds is None:
             inputs_embeds = self.token_embedding(input_ids)
-            # concatenate inputs embeddings with context embeddings
-            prefix = inputs_embeds[:, :ctx_begin_pos]
-            suffix = inputs_embeds[:, ctx_begin_pos:]
 
-            inputs_embeds = torch.cat([prefix, ctx_embeddings, suffix], dim=1)
+            if ctx_embeddings is not None:
+                # concatenate inputs embeddings with context embeddings
+                prefix = inputs_embeds[:, :ctx_begin_pos]
+                suffix = inputs_embeds[:, ctx_begin_pos:]
+
+                inputs_embeds = torch.cat([prefix, ctx_embeddings, suffix], dim=1)
 
         position_embeddings = self.position_embedding(position_ids)
         embeddings = inputs_embeds + position_embeddings

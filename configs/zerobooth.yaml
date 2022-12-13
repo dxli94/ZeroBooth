@@ -1,4 +1,4 @@
-output_dir: "output/pretrain-20221211-bs=3-nq=8-prenorm-norm_clip=all"
+output_dir: "output/pretrain-20221211-bs=2-prenorm-norm_clip=all"
 logging_dir: "logs"
 
 seed: 1337
@@ -13,7 +13,7 @@ model:
 
   # stable diffusion and scheduler
   pretrained_model_name_or_path: "CompVis/stable-diffusion-v1-4"
-  tune_num_layers_sd_text_encoder: 2
+  # tune_num_layers_sd_text_encoder: 2
   revision: null
 
   # BLIP
@@ -34,7 +34,7 @@ model:
   use_grad_checkpointing: True
 
 # optimization
-train_batch_size: 3
+train_batch_size: 2
 gradient_accumulation_steps: 1
 
 learning_rate: 1e-6
