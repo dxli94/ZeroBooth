@@ -4,6 +4,7 @@ import tqdm
 
 import torch
 import torch.nn.functional as F
+import numpy as np
 from torch import nn
 from transformers import CLIPTokenizer
 from transformers.activations import QuickGELUActivation as QuickGELU
@@ -56,10 +57,19 @@ class ZeroBooth(nn.Module):
         print("Loaded BLIP checkpoint from {}, {}".format(config["finetuned"], msg))
 
         # projection layer
+        proj_in_dim, proj_out_dim = 768, 768
+        proj_rate = 4
         self.proj_layer = ProjLayer(
-            in_dim=768, out_dim=768, hidden_dim=3072, drop_p=0.1, eps=1e-12
+            in_dim=proj_in_dim,
+            out_dim=proj_out_dim,
+            hidden_dim=proj_in_dim * proj_rate,
+            drop_p=0.1,
+            eps=1e-12,
         )
-        self.pool_layer = nn.AvgPool1d(2, stride=2)
+        # self.num_query_token = config["num_proj_query_token"] if "num_proj_query_token" in config else 32
+        # assert 32 % self.num_query_token == 0
+        # pool_kernel_size = pool_stride = 32 // self.num_query_token
+        # self.pool_layer = nn.AvgPool1d(kernel_size=pool_kernel_size, stride=pool_stride)
 
         # stable diffusion
         self.tokenizer = CLIPTokenizer.from_pretrained(
@@ -248,7 +258,7 @@ class ZeroBooth(nn.Module):
         do_classifier_free_guidance = guidance_scale > 1.0
 
         if do_classifier_free_guidance:
-            max_length = tokenized_prompt.input_ids.shape[-1] + 32
+            max_length = tokenized_prompt.input_ids.shape[-1] + self.num_query_token
             uncond_input = self.tokenizer(
                 [""],
                 padding="max_length",
@@ -328,7 +338,6 @@ class ZeroBooth(nn.Module):
             )
 
             # predict the noise residual
-
             noise_pred_fg = self.unet(
                 latent_model_input, t, encoder_hidden_states=text_embeddings
             )["sample"]
@@ -338,8 +347,6 @@ class ZeroBooth(nn.Module):
             )["sample"]
 
             # compute value of a in an exponential decay wrt to i
-            import numpy as np
-
             a = np.exp(-theta * i / num_inference_steps)
 
             noise_pred = a * noise_pred_bg + (1 - a) * noise_pred_fg

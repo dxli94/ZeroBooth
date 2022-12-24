@@ -33,7 +33,7 @@ class ImageNetDataset(Dataset):
         superclass_filename="data/imagenet_superclasses.txt",
         **kwargs,
     ):
-        self.inner_dataset, self.classnames = self.load_imagenet_val()
+        self.inner_dataset, self.classnames = self.load_imagenet_train()
 
         self.inp_image_transform = inp_image_transform
         self.tgt_image_transform = tgt_image_transform
@@ -91,7 +91,7 @@ class ImageNetDataset(Dataset):
 
         return dataset
 
-    def load_imagenet_val(self):
+    def load_imagenet_train(self):
         # dataset = self.load_imagenet()["val"]
         dataset = self.load_imagenet()["train"]
         classnames = dataset.classnames
