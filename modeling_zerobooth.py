@@ -66,7 +66,9 @@ class ZeroBooth(nn.Module):
             drop_p=0.1,
             eps=1e-12,
         )
-        # self.num_query_token = config["num_proj_query_token"] if "num_proj_query_token" in config else 32
+        self.num_query_token = (
+            config["num_proj_query_token"] if "num_proj_query_token" in config else 32
+        )
         # assert 32 % self.num_query_token == 0
         # pool_kernel_size = pool_stride = 32 // self.num_query_token
         # self.pool_layer = nn.AvgPool1d(kernel_size=pool_kernel_size, stride=pool_stride)
@@ -146,6 +148,12 @@ class ZeroBooth(nn.Module):
             self.unet.train = self.disabled_train
             self.unet.requires_grad_(False)
 
+        if not self.config["train_text_encoder"]:
+            print("Freezing text encoder")
+            self.text_encoder.eval()
+            self.text_encoder.train = self.disabled_train
+            self.text_encoder.requires_grad_(False)
+
     def disabled_train(self, mode=True):
         """Overwrite model.train with this function to make sure train/eval mode
         does not change anymore."""
@@ -169,6 +177,7 @@ class ZeroBooth(nn.Module):
         )
 
         # projected as clip text embeddings
+        blip_embeddings = blip_embeddings[:, : self.num_query_token, :]
         ctx_embeddings = self.proj_layer(blip_embeddings)
         # ctx_embeddings = self.pool_layer(ctx_embeddings.transpose(1, 2)).transpose(1, 2)
 
@@ -222,6 +231,8 @@ class ZeroBooth(nn.Module):
         eta=1,
         k=125,
         theta=10,
+        disable_bg_model=False,
+        v_condition=False,
     ):
 
         input_image = samples["input_images"]  # reference image
@@ -232,6 +243,7 @@ class ZeroBooth(nn.Module):
 
         # 1. extract BLIP query features and proj to text space -> (bs, 32, 768)
         query_embeds = self.blip(image=input_image, text=text_input)
+        query_embeds = query_embeds[:, : self.num_query_token, :]
         query_embeds = self.proj_layer(query_embeds)
         # query_embeds = self.pool_layer(query_embeds.transpose(1, 2)).transpose(1, 2)
 
@@ -249,50 +261,60 @@ class ZeroBooth(nn.Module):
             ctx_begin_pos=2,
         )[0]
 
-        text_embeddings_bg = self.background_model.text_encoder(
-            input_ids=tokenized_prompt.input_ids,
-            ctx_embeddings=None,
-        )[0]
+        if not disable_bg_model:
+            text_embeddings_bg = self.background_model.text_encoder(
+                input_ids=tokenized_prompt.input_ids,
+                ctx_embeddings=None,
+            )[0]
 
         # 3. unconditional embedding
         do_classifier_free_guidance = guidance_scale > 1.0
 
         if do_classifier_free_guidance:
-            max_length = tokenized_prompt.input_ids.shape[-1] + self.num_query_token
+            max_length = tokenized_prompt.input_ids.shape[-1]
+
+            if not v_condition:
+                max_length += self.num_query_token
+
             uncond_input = self.tokenizer(
                 [""],
                 padding="max_length",
                 max_length=max_length,
                 return_tensors="pt",
             )
+
             # FIXME use context embedding for uncond_input or not?
             uncond_embeddings = self.text_encoder(
                 input_ids=uncond_input.input_ids.to(self.device),
-                ctx_embeddings=None,
-                # ctx_begin_pos=torch.ones_like(ctx_begin_pos),
-                # ctx_begin_pos=2,
+                ctx_embeddings=None if not v_condition else query_embeds,
+                ctx_begin_pos=2,
             )[0]
 
-            max_length = tokenized_prompt.input_ids.shape[-1]
-            uncond_input = self.tokenizer(
-                [""],
-                padding="max_length",
-                max_length=max_length,
-                return_tensors="pt",
-            )
-            # FIXME use context embedding for uncond_input or not?
-            uncond_embeddings_bg = self.background_model.text_encoder(
-                input_ids=uncond_input.input_ids.to(self.device),
-                ctx_embeddings=None,
-                # ctx_begin_pos=torch.ones_like(ctx_begin_pos),
-                # ctx_begin_pos=2,
-            )[0]
+            if not disable_bg_model:
+                max_length = tokenized_prompt.input_ids.shape[-1]
+                uncond_input = self.tokenizer(
+                    [""],
+                    padding="max_length",
+                    max_length=max_length,
+                    return_tensors="pt",
+                )
+                # FIXME use context embedding for uncond_input or not?
+                uncond_embeddings_bg = self.background_model.text_encoder(
+                    input_ids=uncond_input.input_ids.to(self.device),
+                    ctx_embeddings=None,
+                    # ctx_begin_pos=torch.ones_like(ctx_begin_pos),
+                    # ctx_begin_pos=2,
+                )[0]
 
             # For classifier free guidance, we need to do two forward passes.
             # Here we concatenate the unconditional and text embeddings into a single batch
             # to avoid doing two forward passes
             text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
-            text_embeddings_bg = torch.cat([uncond_embeddings_bg, text_embeddings_bg])
+
+            if not disable_bg_model:
+                text_embeddings_bg = torch.cat(
+                    [uncond_embeddings_bg, text_embeddings_bg]
+                )
 
         latents_shape = (1, self.unet.in_channels, height // 8, width // 8)
 
@@ -342,14 +364,17 @@ class ZeroBooth(nn.Module):
                 latent_model_input, t, encoder_hidden_states=text_embeddings
             )["sample"]
 
-            noise_pred_bg = self.background_model.unet(
-                latent_model_input, t, encoder_hidden_states=text_embeddings_bg
-            )["sample"]
+            if not disable_bg_model:
+                noise_pred_bg = self.background_model.unet(
+                    latent_model_input, t, encoder_hidden_states=text_embeddings_bg
+                )["sample"]
 
-            # compute value of a in an exponential decay wrt to i
-            a = np.exp(-theta * i / num_inference_steps)
+                # compute value of a in an exponential decay wrt to i
+                a = np.exp(-theta * i / num_inference_steps)
 
-            noise_pred = a * noise_pred_bg + (1 - a) * noise_pred_fg
+                noise_pred = a * noise_pred_bg + (1 - a) * noise_pred_fg
+            else:
+                noise_pred = noise_pred_fg
 
             # perform guidance
             if do_classifier_free_guidance:

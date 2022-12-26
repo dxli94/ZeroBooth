@@ -3,6 +3,7 @@ import itertools
 import math
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import torch
 import torch.utils.checkpoint
@@ -10,20 +11,17 @@ import yaml
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
+from BLIP2.constant import OPENAI_DATASET_MEAN, OPENAI_DATASET_STD
+from dataset import load_dataset
 from lavis.processors.blip_processors import BlipCaptionProcessor
+from modeling_zerobooth import ZeroBooth
 from torch import nn
 from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
 from tqdm.auto import tqdm
 from transformers.activations import QuickGELUActivation as QuickGELU
 
-from BLIP2.constant import OPENAI_DATASET_MEAN, OPENAI_DATASET_STD
-from dataset import load_dataset
 from diffusers.optimization import get_scheduler
-from modeling_zerobooth import ZeroBooth
-
-from types import SimpleNamespace
-
 
 logger = get_logger(__name__)
 
@@ -41,6 +39,10 @@ def parse_args(input_args=None):
         type=int,
         default=-1,
         help="For distributed training: local_rank",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
     )
     if input_args is not None:
         args = parser.parse_args(input_args)
@@ -199,6 +201,7 @@ def main(args):
         tgt_image_transform=processors["tgt_image_transform"],
         text_transform=processors["text_transform"],
         clip_tokenizer=model.tokenizer,
+        debug=input_args.debug,
     )
     print(f"Loaded {len(train_dataset)} training examples")
 
@@ -317,11 +320,19 @@ def main(args):
             accelerator.log(logs, step=global_step)
 
             # Create the pipeline using using the trained modules and save it.
-            if global_step % args.save_steps == 0 and accelerator.is_main_process:
+            if global_step % args.save_steps == 0:
                 print(f"Saving model at step {global_step}.")
-
                 save_to = os.path.join(args.output_dir, f"{global_step}")
-                unwrap_dist_model(model).save_checkpoint(save_to, accelerator)
+
+                if accelerator.is_main_process:
+                    unwrap_dist_model(model).save_checkpoint(save_to, accelerator)
+
+                validate(
+                    model=unwrap_dist_model(model),
+                    transforms=processors,
+                    out_dir=os.path.join(save_to, "out_images"),
+                    rank=accelerator.process_index,
+                )
 
             if global_step >= args.max_train_steps:
                 break
@@ -329,6 +340,100 @@ def main(args):
         accelerator.wait_for_everyone()
 
     accelerator.end_training()
+
+
+def get_val_dataset():
+    img_paths = [
+        "/export/home/workspace/dreambooth/diffusers/data/NationalGeographic_2731043_4x3.webp",
+        "/export/home/workspace/dreambooth/diffusers/data/NationalGeographic_2731043_4x3.webp",
+        "/export/home/workspace/dreambooth/diffusers/data/NationalGeographic_2731043_4x3.webp",
+        #
+        "/export/home/workspace/dreambooth/diffusers/data/hat-dog.png",
+        "/export/home/workspace/dreambooth/diffusers/data/hat-dog.png",
+        "/export/home/workspace/dreambooth/diffusers/data/hat-dog.png",
+        #
+        "/export/home/workspace/dreambooth/diffusers/data/istockphoto-1311993425-170667a.jpeg",
+        "/export/home/workspace/dreambooth/diffusers/data/istockphoto-1311993425-170667a.jpeg",
+        "/export/home/workspace/dreambooth/diffusers/data/istockphoto-1311993425-170667a.jpeg",
+        #
+        "/export/home/workspace/dreambooth/diffusers/data/purple-flower.jpg",
+    ]
+
+    subj_names = [
+        "dog",
+        "dog",
+        "dog",
+        "dog",
+        "dog",
+        "dog",
+        "cat",
+        "cat",
+        "cat",
+        "flower",
+    ]
+
+    prompts = [
+        "a dog swimming in the ocean",
+        "a dog at the grand canyon, photo by National Geographic",
+        "a dog wearing a space suit",
+        "a dog swimming in the ocean",
+        "a dog at the grand canyon, photo by National Geographic",
+        "a dog wearing a space suit",
+        "a cat swimming in the ocean",
+        "a cat at the grand canyon, photo by National Geographic",
+        "a cat wearing a space suit",
+        "a flower wreath",
+    ]
+
+    return img_paths, subj_names, prompts
+
+
+def validate(model, transforms, out_dir, rank):
+    from PIL import Image
+
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+    subj_image_paths, subj_names, prompts = get_val_dataset()
+    model.eval()
+
+    inp_tsfm = transforms["inp_image_transform"]
+    txt_tsfm = transforms["text_transform"]
+
+    for i, (img_path, subject, prompt) in enumerate(
+        zip(subj_image_paths, subj_names, prompts)
+    ):
+        image = Image.open(img_path).convert("RGB")
+
+        samples = {
+            "input_images": inp_tsfm(image).unsqueeze(0).to(model.device),
+            "class_names": [txt_tsfm(subject)],
+            "prompt": [txt_tsfm(prompt)],
+        }
+
+        for gs, theta in [
+            (7.5, -1),
+            (7.5, 1),
+            (7.5, 2),
+            (7.5, 4),
+            (7.5, 7),
+            # (7.5, 10),
+        ]:
+            output = model.generate(
+                samples,
+                seed=3876998111 + int(rank),
+                guidance_scale=gs,
+                num_inference_steps=250,
+                theta=theta,
+                disable_bg_model=theta < 0,
+            )
+
+            prompt = prompt.replace(" ", "_")
+            out_filename = f"{i}_{prompt}_gs={gs}_theta={theta}_rank{rank}.png"
+            out_filepath = os.path.join(out_dir, out_filename)
+
+            output[0].save(out_filepath)
+
+    model.train()
 
 
 if __name__ == "__main__":

@@ -33,6 +33,8 @@ class ImageNetDataset(Dataset):
         superclass_filename="data/imagenet_superclasses.txt",
         **kwargs,
     ):
+        self.debug = "debug" in kwargs and kwargs["debug"]
+
         self.inner_dataset, self.classnames = self.load_imagenet_train()
 
         self.inp_image_transform = inp_image_transform
@@ -87,13 +89,18 @@ class ImageNetDataset(Dataset):
     def load_imagenet(self):
         from lavis.datasets.builders import load_dataset
 
-        dataset = load_dataset("imagenet")
+        if self.debug:
+            dataset = load_dataset(
+                name="imagenet",
+                cfg_path="/export/home/workspace/LAVIS/lavis/configs/datasets/imagenet/defaults_val.yaml",
+            )["val"]
+        else:
+            dataset = load_dataset("imagenet")["train"]
 
         return dataset
 
     def load_imagenet_train(self):
-        # dataset = self.load_imagenet()["val"]
-        dataset = self.load_imagenet()["train"]
+        dataset = self.load_imagenet()
         classnames = dataset.classnames
 
         return dataset, classnames
