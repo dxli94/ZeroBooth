@@ -33,7 +33,7 @@ class CtxCLIPTextModel(CLIPPreTrainedModel):
     def forward(
         self,
         ctx_embeddings: torch.Tensor = None,
-        ctx_begin_pos: int = None,
+        ctx_begin_pos: list = None,
         input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
@@ -82,7 +82,7 @@ class CtxCLIPTextTransformer(nn.Module):
     def forward(
         self,
         ctx_embeddings: torch.Tensor,
-        ctx_begin_pos: int,
+        ctx_begin_pos: list,
         input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
@@ -192,7 +192,7 @@ class CtxCLIPTextEmbeddings(nn.Module):
     def forward(
         self,
         ctx_embeddings: torch.Tensor,
-        ctx_begin_pos: int,
+        ctx_begin_pos: list,
         input_ids: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
@@ -213,12 +213,23 @@ class CtxCLIPTextEmbeddings(nn.Module):
         if inputs_embeds is None:
             inputs_embeds = self.token_embedding(input_ids)
 
-            if ctx_embeddings is not None:
-                # concatenate inputs embeddings with context embeddings
-                prefix = inputs_embeds[:, :ctx_begin_pos]
-                suffix = inputs_embeds[:, ctx_begin_pos:]
+            # for each input embeddings, add the ctx embeddings at the correct position
+            input_embeds_ctx = []
+            bsz = inputs_embeds.shape[0]
 
-                inputs_embeds = torch.cat([prefix, ctx_embeddings, suffix], dim=1)
+            if ctx_embeddings is not None:
+                for i in range(bsz):
+                    cbp = ctx_begin_pos[i]
+
+                    prefix = inputs_embeds[i, :cbp]
+                    # remove the special token embedding
+                    suffix = inputs_embeds[i, cbp:]
+
+                    input_embeds_ctx.append(
+                        torch.cat([prefix, ctx_embeddings[i], suffix], dim=0)
+                    )
+
+                inputs_embeds = torch.stack(input_embeds_ctx, dim=0)
 
         position_embeddings = self.position_embedding(position_ids)
         embeddings = inputs_embeds + position_embeddings

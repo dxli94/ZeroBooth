@@ -3,6 +3,7 @@ import itertools
 import math
 import os
 from pathlib import Path
+import random
 from types import SimpleNamespace
 
 import torch
@@ -12,14 +13,14 @@ from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from BLIP2.constant import OPENAI_DATASET_MEAN, OPENAI_DATASET_STD
-from dataset import load_dataset
+from dataset import IterLoader, load_dataset
 from lavis.processors.blip_processors import BlipCaptionProcessor
 from modeling_zerobooth import ZeroBooth
-from torch import nn
 from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
 from tqdm.auto import tqdm
-from transformers.activations import QuickGELUActivation as QuickGELU
+
+from torch.utils.data import DistributedSampler
 
 from diffusers.optimization import get_scheduler
 
@@ -70,6 +71,19 @@ def create_transforms(config):
         ]
     )
 
+    inp_image_transform_coco = transforms.Compose(
+        [
+            transforms.RandomResizedCrop(
+                config.image_size,
+                scale=(0.7, 1.0),
+                interpolation=InterpolationMode.BICUBIC,
+            ),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(OPENAI_DATASET_MEAN, OPENAI_DATASET_STD),
+        ]
+    )
+
     # stable diffusion image transform
     tgt_image_transform = transforms.Compose(
         [
@@ -86,6 +100,7 @@ def create_transforms(config):
 
     return {
         "inp_image_transform": inp_image_transform,
+        "inp_image_transform_coco": inp_image_transform_coco,
         "tgt_image_transform": tgt_image_transform,
         "text_transform": text_transform,
     }
@@ -189,6 +204,7 @@ def main(args):
                 [example["input_image"] for example in examples]
             ),
             "class_names": [example["class_name"] for example in examples],
+            "ctx_begin_pos": [example["ctx_begin_pos"] for example in examples],
         }
 
         return batch
@@ -205,13 +221,48 @@ def main(args):
     )
     print(f"Loaded {len(train_dataset)} training examples")
 
+    sampler = DistributedSampler(
+        train_dataset,
+        num_replicas=accelerator.num_processes,
+        rank=accelerator.process_index,
+        shuffle=True,
+    )
+
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=args.train_batch_size,
-        shuffle=True,
         collate_fn=collate_fn,
         num_workers=4,
+        sampler=sampler,
     )
+
+    train_dataset_coco = load_dataset(
+        dataset_name="coco",
+        inp_image_transform=processors["inp_image_transform_coco"],
+        tgt_image_transform=processors["tgt_image_transform"],
+        text_transform=processors["text_transform"],
+        clip_tokenizer=model.tokenizer,
+        debug=input_args.debug,
+    )
+
+    sampler = DistributedSampler(
+        train_dataset_coco,
+        num_replicas=accelerator.num_processes,
+        rank=accelerator.process_index,
+        shuffle=True,
+    )
+
+    train_dataloader_coco = torch.utils.data.DataLoader(
+        train_dataset_coco,
+        batch_size=args.train_batch_size,
+        collate_fn=collate_fn,
+        num_workers=4,
+        sampler=sampler,
+    )
+    print("Loaded data {} samples.".format(len(train_dataset_coco)))
+
+    train_dataloader = IterLoader(train_dataloader)
+    train_dataloader_coco = IterLoader(train_dataloader_coco)
 
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
@@ -229,10 +280,17 @@ def main(args):
         num_training_steps=args.max_train_steps * args.gradient_accumulation_steps,
     )
 
-    (model, optimizer, train_dataloader, lr_scheduler,) = accelerator.prepare(
+    (
         model,
         optimizer,
-        train_dataloader,
+        # train_dataloader,
+        # train_dataloader_coco,
+        lr_scheduler,
+    ) = accelerator.prepare(
+        model,
+        optimizer,
+        # train_dataloader,
+        # train_dataloader_coco,
         lr_scheduler,
     )
 
@@ -292,52 +350,58 @@ def main(args):
     progress_bar.set_description("Steps")
     global_step = 0
 
-    for epoch in range(args.num_train_epochs):
-        model.train()
+    # for epoch in range(args.num_train_epochs):
+    model.train()
 
-        for step, batch in enumerate(train_dataloader):
-            loss = model(batch)
+    # for step, batch in enumerate(train_dataloader):
+    while True:
+        if random.random() < 0.5:
+            batch = next(train_dataloader)
+        else:
+            batch = next(train_dataloader_coco)
 
-            accelerator.backward(loss)
-            if accelerator.sync_gradients:
-                accelerator.clip_grad_norm_(model_params, args.max_grad_norm)
+        loss = model(batch)
 
-            optimizer.step()
-            lr_scheduler.step()
-            optimizer.zero_grad()
+        accelerator.backward(loss)
+        if accelerator.sync_gradients:
+            accelerator.clip_grad_norm_(model_params, args.max_grad_norm)
 
-            # Checks if the accelerator has performed an optimization step behind the scenes
-            if accelerator.sync_gradients:
-                progress_bar.update(1)
-                global_step += 1
+        optimizer.step()
+        lr_scheduler.step()
+        optimizer.zero_grad()
 
-            logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
+        # Checks if the accelerator has performed an optimization step behind the scenes
+        if accelerator.sync_gradients:
+            progress_bar.update(1)
+            global_step += 1
 
-            if global_step % args.logging_steps == 0:
-                print(logs)
+        logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
 
-            progress_bar.set_postfix(**logs)
-            accelerator.log(logs, step=global_step)
+        if global_step % args.logging_steps == 0:
+            print(logs)
 
-            # Create the pipeline using using the trained modules and save it.
-            if global_step % args.save_steps == 0:
-                print(f"Saving model at step {global_step}.")
-                save_to = os.path.join(args.output_dir, f"{global_step}")
+        progress_bar.set_postfix(**logs)
+        accelerator.log(logs, step=global_step)
 
-                if accelerator.is_main_process:
-                    unwrap_dist_model(model).save_checkpoint(save_to, accelerator)
+        # Create the pipeline using using the trained modules and save it.
+        if global_step % args.save_steps == 0:
+            print(f"Saving model at step {global_step}.")
+            save_to = os.path.join(args.output_dir, f"{global_step}")
 
-                validate(
-                    model=unwrap_dist_model(model),
-                    transforms=processors,
-                    out_dir=os.path.join(save_to, "out_images"),
-                    rank=accelerator.process_index,
-                )
+            if accelerator.is_main_process:
+                unwrap_dist_model(model).save_checkpoint(save_to, accelerator)
 
-            if global_step >= args.max_train_steps:
-                break
+            validate(
+                model=unwrap_dist_model(model),
+                transforms=processors,
+                out_dir=os.path.join(save_to, "out_images"),
+                rank=accelerator.process_index,
+            )
 
-        accelerator.wait_for_everyone()
+        if global_step >= args.max_train_steps:
+            break
+
+    accelerator.wait_for_everyone()
 
     accelerator.end_training()
 
@@ -413,7 +477,7 @@ def validate(model, transforms, out_dir, rank):
         for gs, theta in [
             (7.5, -1),
             (7.5, 1),
-            (7.5, 2),
+            # (7.5, 2),
             (7.5, 4),
             (7.5, 7),
             # (7.5, 10),

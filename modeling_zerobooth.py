@@ -171,14 +171,6 @@ class ZeroBooth(nn.Module):
             - pixel_values: [B, 3, 512, 512], GT for stable diffusion to compute loss
             - input_ids
         """
-        blip_embeddings = self.blip(
-            image=batch["input_images"],
-            text=batch["class_names"],
-        )
-
-        # projected as clip text embeddings
-        blip_embeddings = blip_embeddings[:, : self.num_query_token, :]
-        ctx_embeddings = self.proj_layer(blip_embeddings)
         # ctx_embeddings = self.pool_layer(ctx_embeddings.transpose(1, 2)).transpose(1, 2)
 
         # TODO update CLIP embedding layer with projected blip embeddings
@@ -205,12 +197,21 @@ class ZeroBooth(nn.Module):
         # (this is the forward diffusion process)
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
 
+        blip_embeddings = self.blip(
+            image=batch["input_images"],
+            text=batch["class_names"],
+        )
+
+        # projected as clip text embeddings
+        blip_embeddings = blip_embeddings[:, : self.num_query_token, :]
+        ctx_embeddings = self.proj_layer(blip_embeddings)
+
         # Get the text embedding for conditioning
         # TODO make it configurable rather than hardcoding 2 (2 = len(["[pad]", "a"])
         encoder_hidden_states = self.text_encoder(
             input_ids=batch["input_ids"],
             ctx_embeddings=ctx_embeddings,
-            ctx_begin_pos=2,
+            ctx_begin_pos=batch["ctx_begin_pos"],
         )[0]
 
         # Predict the noise residual
@@ -258,7 +259,7 @@ class ZeroBooth(nn.Module):
         text_embeddings = self.text_encoder(
             input_ids=tokenized_prompt.input_ids,
             ctx_embeddings=query_embeds,
-            ctx_begin_pos=2,
+            ctx_begin_pos=[2],
         )[0]
 
         if not disable_bg_model:
