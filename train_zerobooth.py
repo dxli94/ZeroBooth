@@ -437,16 +437,22 @@ def get_val_dataset():
     ]
 
     prompts = [
-        "a dog swimming in the ocean",
-        "a dog at the grand canyon, photo by National Geographic",
-        "a dog wearing a space suit",
-        "a dog swimming in the ocean",
-        "a dog at the grand canyon, photo by National Geographic",
-        "a dog wearing a space suit",
-        "a cat swimming in the ocean",
-        "a cat at the grand canyon, photo by National Geographic",
-        "a cat wearing a space suit",
-        "a flower wreath",
+        "a dog " + ", ".join(["swimming in the ocean"] * 20),
+        "a dog "
+        + ", ".join(["at the grand canyon, photo by National Geographic"] * 20),
+        "a dog " + ", ".join(["wearing a superman suit"] * 20),
+        #
+        "a dog " + ", ".join(["swimming in the ocean"] * 20),
+        "a dog "
+        + ", ".join(["at the grand canyon, photo by National Geographic"] * 20),
+        "a dog " + ", ".join(["wearing a superman suit"] * 20),
+        #
+        "a cat " + ", ".join(["swimming in the ocean"] * 20),
+        "a cat "
+        + ", ".join(["at the grand canyon, photo by National Geographic"] * 20),
+        "a cat " + ", ".join(["wearing a superman suit"] * 20),
+        #
+        "a flower " + ", ".join(["wreath, award-winning"] * 20),
     ]
 
     return img_paths, subj_names, prompts
@@ -472,14 +478,15 @@ def validate(model, transforms, out_dir, rank):
             "input_images": inp_tsfm(image).unsqueeze(0).to(model.device),
             "class_names": [txt_tsfm(subject)],
             "prompt": [txt_tsfm(prompt)],
+            "ctx_begin_pos": [2],
         }
 
         for gs, theta in [
             (7.5, -1),
-            (7.5, 1),
+            # (7.5, 1),
             # (7.5, 2),
-            (7.5, 4),
-            (7.5, 7),
+            # (7.5, 4),
+            # (7.5, 7),
             # (7.5, 10),
         ]:
             output = model.generate(
@@ -492,7 +499,7 @@ def validate(model, transforms, out_dir, rank):
             )
 
             prompt = prompt.replace(" ", "_")
-            out_filename = f"{i}_{prompt}_gs={gs}_theta={theta}_rank{rank}.png"
+            out_filename = f"{i}_{prompt[:20]}_gs={gs}_theta={theta}_rank{rank}.png"
             out_filepath = os.path.join(out_dir, out_filename)
 
             output[0].save(out_filepath)
