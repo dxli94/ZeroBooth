@@ -53,8 +53,8 @@ class BLIP_Pretrain(nn.Module):
         if "cross_attention_freq" in config:
             print("cross_attention_freq: %d" % config["cross_attention_freq"])
             encoder_config.cross_attention_freq = config["cross_attention_freq"]
-        # else:
-        #     encoder_config.cross_attention_freq = 1
+        else:
+            encoder_config.cross_attention_freq = 1
         encoder_config.query_length = config["num_query_token"]
 
         self.text_model = BertLMHeadModel.from_pretrained(

@@ -37,6 +37,4 @@ embed_dim: 256
 # optimizer
 weight_decay: 0.05
 
-
-
-
+finetuned: 'BLIP2/pretrain_blipv2/eval_clip.pth"

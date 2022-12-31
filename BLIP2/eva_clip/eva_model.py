@@ -14,7 +14,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from eva_clip.vit_model import VisionTransformer
+from BLIP2.eva_clip.vit_model import VisionTransformer
+
 
 class LayerNorm(nn.LayerNorm):
     """Subclass torch's LayerNorm to handle fp16."""
@@ -33,23 +34,23 @@ class QuickGELU(nn.Module):
 
 class Attention(nn.Module):
     def __init__(
-            self,
-            dim,
-            num_heads=8,
-            qkv_bias=True,
-            scaled_cosine=False,
-            scale_heads=False,
-            logit_scale_max=math.log(1. / 0.01),
-            attn_drop=0.,
-            proj_drop=0.
+        self,
+        dim,
+        num_heads=8,
+        qkv_bias=True,
+        scaled_cosine=False,
+        scale_heads=False,
+        logit_scale_max=math.log(1.0 / 0.01),
+        attn_drop=0.0,
+        proj_drop=0.0,
     ):
         super().__init__()
         self.scaled_cosine = scaled_cosine
         self.scale_heads = scale_heads
-        assert dim % num_heads == 0, 'dim should be divisible by num_heads'
+        assert dim % num_heads == 0, "dim should be divisible by num_heads"
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
-        self.scale = self.head_dim ** -0.5
+        self.scale = self.head_dim**-0.5
         self.logit_scale_max = logit_scale_max
 
         # keeping in_proj in this form (instead of nn.Linear) to match weight scheme of original
@@ -60,7 +61,9 @@ class Attention(nn.Module):
             self.in_proj_bias = None
 
         if self.scaled_cosine:
-            self.logit_scale = nn.Parameter(torch.log(10 * torch.ones((num_heads, 1, 1))))
+            self.logit_scale = nn.Parameter(
+                torch.log(10 * torch.ones((num_heads, 1, 1)))
+            )
         else:
             self.logit_scale = None
         self.attn_drop = nn.Dropout(attn_drop)
@@ -79,7 +82,9 @@ class Attention(nn.Module):
         v = v.contiguous().view(L, N * self.num_heads, -1).transpose(0, 1)
 
         if self.logit_scale is not None:
-            attn = torch.bmm(F.normalize(q, dim=-1), F.normalize(k, dim=-1).transpose(-1, -2))
+            attn = torch.bmm(
+                F.normalize(q, dim=-1), F.normalize(k, dim=-1).transpose(-1, -2)
+            )
             logit_scale = torch.clamp(self.logit_scale, max=self.logit_scale_max).exp()
             attn = attn.view(N, self.num_heads, L, L) * logit_scale
             attn = attn.view(-1, L, L)
@@ -109,15 +114,15 @@ class Attention(nn.Module):
 
 class ResidualAttentionBlock(nn.Module):
     def __init__(
-            self,
-            d_model: int,
-            n_head: int,
-            mlp_ratio: float = 4.0,
-            act_layer: Callable = nn.GELU,
-            scale_cosine_attn: bool = False,
-            scale_heads: bool = False,
-            scale_attn: bool = False,
-            scale_fc: bool = False,
+        self,
+        d_model: int,
+        n_head: int,
+        mlp_ratio: float = 4.0,
+        act_layer: Callable = nn.GELU,
+        scale_cosine_attn: bool = False,
+        scale_heads: bool = False,
+        scale_attn: bool = False,
+        scale_fc: bool = False,
     ):
         super().__init__()
 
@@ -134,12 +139,16 @@ class ResidualAttentionBlock(nn.Module):
 
         self.ln_2 = LayerNorm(d_model)
         mlp_width = int(d_model * mlp_ratio)
-        self.mlp = nn.Sequential(OrderedDict([
-            ("c_fc", nn.Linear(d_model, mlp_width)),
-            ('ln', LayerNorm(mlp_width) if scale_fc else nn.Identity()),
-            ("gelu", act_layer()),
-            ("c_proj", nn.Linear(mlp_width, d_model))
-        ]))
+        self.mlp = nn.Sequential(
+            OrderedDict(
+                [
+                    ("c_fc", nn.Linear(d_model, mlp_width)),
+                    ("ln", LayerNorm(mlp_width) if scale_fc else nn.Identity()),
+                    ("gelu", act_layer()),
+                    ("c_proj", nn.Linear(mlp_width, d_model)),
+                ]
+            )
+        )
 
     def attention(self, x: torch.Tensor, attn_mask: Optional[torch.Tensor] = None):
         return self.attn(x, x, x, need_weights=False, attn_mask=attn_mask)[0]
@@ -149,41 +158,58 @@ class ResidualAttentionBlock(nn.Module):
         # else:
         #     return self.attn(x, attn_mask=attn_mask)
 
-    def cross_attention(self, x: torch.Tensor, context: torch.Tensor, attn_mask: Optional[torch.Tensor] = None):
-        return self.attn(x, context, context, need_weights=False, attn_mask=attn_mask)[0]
-
+    def cross_attention(
+        self,
+        x: torch.Tensor,
+        context: torch.Tensor,
+        attn_mask: Optional[torch.Tensor] = None,
+    ):
+        return self.attn(x, context, context, need_weights=False, attn_mask=attn_mask)[
+            0
+        ]
 
     def forward(self, x: torch.Tensor, attn_mask: Optional[torch.Tensor] = None):
         x = x + self.ln_attn(self.attention(self.ln_1(x), attn_mask=attn_mask))
         x = x + self.mlp(self.ln_2(x))
         return x
 
+
 class Transformer(nn.Module):
-    def __init__(self, width: int, layers: int, heads: int,  mlp_ratio: float = 4.0, act_layer: Callable = nn.GELU):
+    def __init__(
+        self,
+        width: int,
+        layers: int,
+        heads: int,
+        mlp_ratio: float = 4.0,
+        act_layer: Callable = nn.GELU,
+    ):
         super().__init__()
         self.width = width
         self.layers = layers
 
-        self.resblocks = nn.ModuleList([
-            ResidualAttentionBlock(width, heads, mlp_ratio, act_layer=act_layer)
-            for _ in range(layers)
-        ])
+        self.resblocks = nn.ModuleList(
+            [
+                ResidualAttentionBlock(width, heads, mlp_ratio, act_layer=act_layer)
+                for _ in range(layers)
+            ]
+        )
 
     def forward(self, x: torch.Tensor, attn_mask: Optional[torch.Tensor] = None):
         for r in self.resblocks:
             x = r(x, attn_mask=attn_mask)
         return x
 
+
 class TextTransformer(nn.Module):
     def __init__(
-            self,
-            vocab_size: int,
-            width: int,
-            layers: int,
-            heads: int,
-            context_length: int,
-            embed_dim: int,
-            act_layer: Callable = nn.GELU,
+        self,
+        vocab_size: int,
+        width: int,
+        layers: int,
+        heads: int,
+        context_length: int,
+        embed_dim: int,
+        act_layer: Callable = nn.GELU,
     ):
         super().__init__()
         self.transformer = Transformer(
@@ -200,7 +226,7 @@ class TextTransformer(nn.Module):
 
         self.text_projection = nn.Parameter(torch.empty(width, embed_dim))
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
-        self.register_buffer('attn_mask', self.build_attention_mask(), persistent=False)
+        self.register_buffer("attn_mask", self.build_attention_mask(), persistent=False)
 
         self.init_parameters()
 
@@ -209,8 +235,10 @@ class TextTransformer(nn.Module):
         nn.init.normal_(self.positional_embedding, std=0.01)
         nn.init.constant_(self.logit_scale, np.log(1 / 0.07))
 
-        proj_std = (self.transformer.width ** -0.5) * ((2 * self.transformer.layers) ** -0.5)
-        attn_std = self.transformer.width ** -0.5
+        proj_std = (self.transformer.width**-0.5) * (
+            (2 * self.transformer.layers) ** -0.5
+        )
+        attn_std = self.transformer.width**-0.5
         fc_std = (2 * self.transformer.width) ** -0.5
         for block in self.transformer.resblocks:
             nn.init.normal_(block.attn.in_proj_weight, std=attn_std)
@@ -219,7 +247,7 @@ class TextTransformer(nn.Module):
             nn.init.normal_(block.mlp.c_proj.weight, std=proj_std)
 
         if self.text_projection is not None:
-            nn.init.normal_(self.text_projection, std=self.transformer.width ** -0.5)
+            nn.init.normal_(self.text_projection, std=self.transformer.width**-0.5)
 
     def build_attention_mask(self):
         # lazily create causal attention mask, with full attention between the vision tokens
@@ -249,6 +277,7 @@ class TextTransformer(nn.Module):
             x = x @ self.text_projection
         return x
 
+
 @dataclass
 class CLIPVisionCfg:
     layers: Union[Tuple[int, int, int, int], int] = 12
@@ -258,7 +287,7 @@ class CLIPVisionCfg:
     patch_size: int = 16
     image_size: Union[Tuple[int, int], int] = 224
     layer_scale_init_value: float = None
-    drop_path_rate:float = 0.
+    drop_path_rate: float = 0.0
 
 
 @dataclass
@@ -272,11 +301,11 @@ class CLIPTextCfg:
 
 class EVA_CLIP(nn.Module):
     def __init__(
-            self,
-            embed_dim: int,
-            vision_cfg: CLIPVisionCfg,
-            text_cfg: CLIPTextCfg,
-            quick_gelu: bool = False,
+        self,
+        embed_dim: int,
+        vision_cfg: CLIPVisionCfg,
+        text_cfg: CLIPTextCfg,
+        quick_gelu: bool = False,
     ):
         super().__init__()
         if isinstance(vision_cfg, dict):
@@ -296,12 +325,12 @@ class EVA_CLIP(nn.Module):
             use_mean_pooling=False,
             init_values=vision_cfg.layer_scale_init_value,
             embed_dim=vision_cfg.width,
-            depth=vision_cfg.layers-1,
+            depth=vision_cfg.layers - 1,
             num_heads=vision_heads,
             mlp_ratio=vision_cfg.mlp_ratio,
             qkv_bias=True,
             drop_path_rate=vision_cfg.drop_path_rate,
-            norm_layer=partial(nn.LayerNorm, eps=1e-6)
+            norm_layer=partial(nn.LayerNorm, eps=1e-6),
         )
 
         self.text = TextTransformer(
@@ -311,7 +340,7 @@ class EVA_CLIP(nn.Module):
             heads=text_cfg.heads,
             context_length=text_cfg.context_length,
             embed_dim=embed_dim,
-            act_layer=act_layer
+            act_layer=act_layer,
         )
 
     def encode_image(self, image):
@@ -344,15 +373,20 @@ def convert_weights_to_fp16(model: nn.Module):
                 l.bias.data = l.bias.data.half()
 
         if isinstance(l, (nn.MultiheadAttention, Attention)):
-            for attr in [*[f"{s}_proj_weight" for s in ["in", "q", "k", "v"]], "in_proj_bias", "bias_k", "bias_v"]:
+            for attr in [
+                *[f"{s}_proj_weight" for s in ["in", "q", "k", "v"]],
+                "in_proj_bias",
+                "bias_k",
+                "bias_v",
+            ]:
                 tensor = getattr(l, attr)
                 if tensor is not None:
                     tensor.data = tensor.data.half()
 
-#         for name in ["text_projection", "proj"]:
-#             if hasattr(l, name):
-#                 attr = getattr(l, name)
-#                 if attr is not None:
-#                     attr.data = attr.data.half()
+    #         for name in ["text_projection", "proj"]:
+    #             if hasattr(l, name):
+    #                 attr = getattr(l, name)
+    #                 if attr is not None:
+    #                     attr.data = attr.data.half()
 
     model.apply(_convert_weights_to_fp16)

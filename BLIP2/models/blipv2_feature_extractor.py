@@ -52,12 +52,26 @@ class BLIP(nn.Module):
         encoder_config = BertConfig.from_pretrained(config["text_model"])
         encoder_config.encoder_width = vision_width
         encoder_config.add_cross_attention = True
+        if "cross_attention_freq" in config:
+            print("cross_attention_freq: %d" % config["cross_attention_freq"])
+            encoder_config.cross_attention_freq = config["cross_attention_freq"]
+        # else:
+        #     encoder_config.cross_attention_freq = 1
         encoder_config.query_length = config["num_query_token"]
 
         self.text_model = BertLMHeadModel.from_pretrained(
             config["text_model"], config=encoder_config
         )
         self.text_model.resize_token_embeddings(len(self.tokenizer))
+
+        # [TODO] is this the right way to do it?
+        if config["vision_model"] == "evaclip":
+            state_dict = self.text_model.state_dict()
+            for name, param in self.text_model.named_parameters():
+                if "_query" in name:
+                    key_orig = name.replace("_query", "")
+                    param.data.copy_(state_dict[key_orig])
+                    print("copy from %s to %s" % (key_orig, name))
 
         self.query_tokens = nn.Parameter(
             torch.zeros(1, config["num_query_token"], encoder_config.hidden_size)
@@ -77,14 +91,15 @@ class BLIP(nn.Module):
 
         self.max_text_length = config["max_text_length"]
 
-        checkpoint = torch.load(config["pretrained"], map_location="cpu")
-        state_dict = checkpoint["model"]
-        for k in list(state_dict.keys()):
-            if "visual_encoder.positional_embedding" in k:
-                del state_dict[k]
-        msg = self.load_state_dict(state_dict, strict=False)
-        print("load checkpoint from %s" % config["pretrained"])
-        print(msg)
+        if "pretrained" in config:
+            checkpoint = torch.load(config["pretrained"], map_location="cpu")
+            state_dict = checkpoint["model"]
+            for k in list(state_dict.keys()):
+                if "visual_encoder.positional_embedding" in k:
+                    del state_dict[k]
+            msg = self.load_state_dict(state_dict, strict=False)
+            print("load checkpoint from %s" % config["pretrained"])
+            print(msg)
 
     def forward(self, image, text):
 

@@ -19,8 +19,9 @@ def create_clip_vit(vit, image_size, use_grad_checkpointing=False, precision='fp
             clip_model.visual.set_grad_checkpointing() 
 
     elif vit=='evaclip':
-        from eva_clip import build_eva_model_and_transforms
-        eva_clip_path = "eva_clip/eva_clip_psz14.pt" 
+        from BLIP2.eva_clip.eva_clip import build_eva_model_and_transforms
+        # eva_clip_path = "eva_clip/eva_clip_psz14.pt" 
+        eva_clip_path = "BLIP2/eva_clip/eva_clip_psz14.pt"
         clip_model, _ = build_eva_model_and_transforms("EVA_CLIP_g_14", precision=precision, pretrained=eva_clip_path, device=torch.device('cuda'))
 
     else:
