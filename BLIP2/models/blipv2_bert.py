@@ -50,6 +50,11 @@ class BLIP_Pretrain(nn.Module):
         encoder_config = BertConfig.from_pretrained(config["text_model"])
         encoder_config.encoder_width = vision_width
         encoder_config.add_cross_attention = True
+        if "cross_attention_freq" in config:
+            print("cross_attention_freq: %d" % config["cross_attention_freq"])
+            encoder_config.cross_attention_freq = config["cross_attention_freq"]
+        # else:
+        #     encoder_config.cross_attention_freq = 1
         encoder_config.query_length = config["num_query_token"]
 
         self.text_model = BertLMHeadModel.from_pretrained(
@@ -360,11 +365,6 @@ class BLIP_Pretrain(nn.Module):
             image.device
         )
 
-        model_kwargs = {
-            "encoder_hidden_states": image_embeds,
-            "encoder_attention_mask": image_atts,
-        }
-
         input_ids = (
             torch.LongTensor(image.size(0), 1)
             .fill_(self.tokenizer.bos_token_id)
@@ -377,6 +377,8 @@ class BLIP_Pretrain(nn.Module):
             outputs = self.text_model.generate(
                 input_ids=input_ids,
                 query_embeds=query_tokens,
+                encoder_hidden_states=image_embeds,
+                encoder_attention_mask=image_atts,
                 max_length=max_length,
                 min_length=min_length,
                 do_sample=True,
@@ -384,19 +386,19 @@ class BLIP_Pretrain(nn.Module):
                 num_return_sequences=1,
                 eos_token_id=self.tokenizer.sep_token_id,
                 pad_token_id=self.tokenizer.pad_token_id,
-                **model_kwargs
             )
         else:
             # beam search
             outputs = self.text_model.generate(
                 input_ids=input_ids,
                 query_embeds=query_tokens,
+                encoder_hidden_states=image_embeds,
+                encoder_attention_mask=image_atts,
                 max_length=max_length,
                 min_length=min_length,
                 num_beams=num_beams,
                 eos_token_id=self.tokenizer.sep_token_id,
                 pad_token_id=self.tokenizer.pad_token_id,
-                **model_kwargs
             )
 
         captions = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)

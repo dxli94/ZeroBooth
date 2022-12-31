@@ -1,0 +1,42 @@
+train_web: '/export/laion400m/laion115m_capfilt_20220817'
+train_ann: ['/export/share/junnan-li/VL_pretrain/annotation/coco_karpathy_train.json',
+             '/export/share/junnan-li/VL_pretrain/annotation/vg_caption.json',
+             '/export/share/datasets/vision_language/capfilt_14m_new/annotation.json'
+             ]
+
+retrieval_image_path: '/export/share/datasets/vision/coco/images/'
+retrieval_dataset: 'coco'
+
+coco_path: '/export/share/datasets/vision/coco/images/'
+coco_gt_root: '../BLIP/annotation/coco_gt'
+
+text_model: 'bert-base-uncased'
+
+cross_attention_freq: 2
+
+# vision_model: "clip"
+vision_model: "evaclip"
+# vision_model: "openclip"
+
+
+batch_size: 50
+use_laion: True
+init_lr: 1e-4
+min_lr: 5e-6
+max_epoch: 15
+
+warmup_lr: 1e-8
+warmup_steps: 5000
+
+image_size: 224
+
+num_query_token: 32
+max_text_length: 32
+embed_dim: 256
+
+# optimizer
+weight_decay: 0.05
+
+
+
+

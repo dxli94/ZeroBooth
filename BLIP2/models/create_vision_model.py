@@ -1,4 +1,7 @@
-from BLIP2.CLIP import clip
+try:
+    from BLIP2.CLIP import clip
+except ModuleNotFoundError:
+    from CLIP import clip
 import torch
 from scipy import interpolate
 import numpy as np
@@ -14,6 +17,12 @@ def create_clip_vit(vit, image_size, use_grad_checkpointing=False, precision='fp
                                            )
         if use_grad_checkpointing:
             clip_model.visual.set_grad_checkpointing() 
+
+    elif vit=='evaclip':
+        from eva_clip import build_eva_model_and_transforms
+        eva_clip_path = "eva_clip/eva_clip_psz14.pt" 
+        clip_model, _ = build_eva_model_and_transforms("EVA_CLIP_g_14", precision=precision, pretrained=eva_clip_path, device=torch.device('cuda'))
+
     else:
         device = 'cuda' if precision=='fp16' else 'cpu'
         clip_model, _ = clip.load('ViT-L/14', device=device, image_resolution=image_size, 
