@@ -1,5 +1,7 @@
 import time
 import os
+import json
+import pandas as pd
 import random
 from torch.utils.data import Dataset
 from PIL import Image
@@ -11,6 +13,8 @@ def load_dataset(
     tgt_image_transform,
     text_transform,
     clip_tokenizer,
+    inp_bbox_transform,
+    tgt_bbox_transform,
     **kwargs,
 ):
     if dataset_name == "imagenet":
@@ -33,8 +37,299 @@ def load_dataset(
             exclude_categories=set(["person", "bed", "dining table", "couch", "truck"]),
             **kwargs,
         )
+    elif dataset_name == "openimage":
+        return OpenImageDataset(
+            inp_image_transform=inp_image_transform,
+            inp_bbox_transform=inp_bbox_transform,
+            tgt_image_transform=tgt_image_transform,
+            tgt_bbox_transform=tgt_bbox_transform,
+            text_transform=text_transform,
+            clip_tokenizer=clip_tokenizer,
+            split="validation" if "debug" in kwargs and kwargs["debug"] else "train",
+        )
     else:
         raise ValueError(f"Unknown dataset {dataset_name}")
+
+
+class OpenImageDataset(Dataset):
+    def __init__(
+        self,
+        inp_image_transform=None,
+        tgt_image_transform=None,
+        inp_bbox_transform=None,
+        tgt_bbox_transform=None,
+        text_transform=None,
+        clip_tokenizer=None,
+        root_dir="/export/share/dongxuli/fiftyone/open-images-v6",
+        split="validation",
+        imagedir_path="data",
+        annotation_path="labels/detections.csv",
+        filtered_annotation_path="labels/detections_filtered.csv",
+        cls_mapping_path="metadata/classes.csv",
+        capfilt_caption_path="labels/capfilt2.json",
+        load_cache=True,
+        save_after_filter=False,
+        min_size=0.30,
+        max_size=0.80,
+        **kwargs,
+    ):
+        self.inp_image_transform = inp_image_transform
+        self.inp_bbox_transform = inp_bbox_transform
+
+        self.tgt_image_transform = tgt_image_transform
+        self.tgt_bbox_transform = tgt_bbox_transform
+
+        self.text_transform = text_transform
+        self.clip_tokenizer = clip_tokenizer
+
+        self.root_dir = root_dir
+        self.split = split
+        self.imagedir_path = os.path.join(root_dir, split, imagedir_path)
+
+        self.cls_id2name = self._load_cls_id2name(cls_mapping_path)
+        self.forbid_labels = self._create_forbid_labels()
+
+        capfilt_caption_path = os.path.join(root_dir, split, capfilt_caption_path)
+        self.img2captions = self._load_captions(capfilt_caption_path)
+
+        annotation_path = os.path.join(root_dir, split, annotation_path)
+        filtered_annotation_path = os.path.join(root_dir, split, filtered_annotation_path)
+
+        if load_cache and os.path.exists(filtered_annotation_path):
+            self.annotations = pd.read_csv(filtered_annotation_path)
+            print("All labels:", len(self.annotations))
+        else:
+            self.annotations = self._load_annotations(annotation_path, min_size, max_size)
+
+            if save_after_filter:
+                print("Saving filtered labels to", filtered_annotation_path)
+                self.annotations.to_csv(filtered_annotation_path, index=False)
+        
+    def _load_captions(self, capfilt_caption_path):
+        content = json.load(open(capfilt_caption_path))
+
+        img2captions = {}
+
+        for item in content:
+            image_id = item["image_id"]
+            label = item["label"]
+
+            captions = [f"{cap}, the {label} is" for cap in item["caption"]]
+
+            if image_id not in img2captions:
+                img2captions[image_id] = dict()
+            
+            img2captions[image_id][label] = captions
+
+        return img2captions
+
+    def _load_annotations(self, annotation_path, min_size, max_size):
+        def get_size(row):
+            xmin, xmax, ymin, ymax = row["XMin"], row["XMax"], row["YMin"], row["YMax"]
+
+            return (xmax - xmin) * (ymax - ymin)
+
+        def is_extreme_aspect_ratio(row, max_ratio=2):
+            xmin, xmax, ymin, ymax = row["XMin"], row["XMax"], row["YMin"], row["YMax"]
+
+            width = xmax - xmin
+            height = ymax - ymin
+
+            return width / height > max_ratio or height / width > max_ratio
+
+        # read labels from pandas csv
+        annotations = pd.read_csv(annotation_path)
+
+        print("All labels:", len(annotations))
+        annotations = annotations[annotations["IsGroupOf"] == 0]
+        # labels = labels[labels["IsOccluded"] == 0]
+        annotations = annotations[annotations["IsInside"] == 0]
+        print("After drop group of, inside:", len(annotations))
+
+        # discard an image if it contains more than 1 object of the same class
+        annotations = annotations.drop_duplicates(subset=["ImageID", "LabelName"])
+        print("After drop duplicates:", len(annotations))
+
+        # add class name to labels
+        annotations["LabelString"] = annotations["LabelName"].apply(lambda x: self.cls_id2name[x])
+        # filter out forbidden labels
+        annotations = annotations[~annotations["LabelName"].apply(self._isin_forbid_labels)]
+        print("After filter out forbidden labels:", len(annotations))
+
+        # filter out small objects
+        # filter out full-frame objects
+        annotations = annotations[annotations.apply(get_size, axis=1) < max_size]
+        annotations = annotations[annotations.apply(get_size, axis=1) > min_size]
+        print("After filter out small and full-frame objects:", len(annotations))
+
+        # filter out object with extreme aspect ratio
+        annotations = annotations[~annotations.apply(is_extreme_aspect_ratio, axis=1)]
+        print("After filter out extreme aspect ratio:", len(annotations))
+
+        # filter out images if it contains more than 1 object
+        # max_obj = 1
+        # labels = labels.groupby("ImageID").filter(lambda x: len(x) <= max_obj)
+        # labels = labels.groupby("ImageID").filter(lambda x: len(x) <= 2)
+        # print(f"After filter out images with more than {max_obj} objects:", len(labels))
+
+        total_unique_images = len(annotations["ImageID"].unique())
+        print("Total unique images:", total_unique_images)
+
+        return annotations
+
+    def _isin_forbid_labels(self, label):
+        return label in self.forbid_labels
+
+    def _load_cls_id2name(self, cls_mapping_path):
+        cls_mapping_path = os.path.join(self.root_dir, self.split, cls_mapping_path)
+
+        # csv file
+        cls_mapping = pd.read_csv(cls_mapping_path, header=None)
+
+        cls_id2name = {}
+        for _, row in cls_mapping.iterrows():
+            cls_id2name[row[0]] = row[1]
+
+        return cls_id2name
+
+    def __len__(self):
+        return len(self.annotations)
+
+    def __getitem__(self, idx):
+        row = self.annotations.iloc[idx]
+
+        image_path = os.path.join(self.imagedir_path, row["ImageID"] + ".jpg")
+        image = Image.open(image_path).convert("RGB")
+        width, height = image.size
+
+        label = self.cls_id2name[row["LabelName"]].lower()
+        caption = random.choice(self.img2captions[row["ImageID"]][label])
+        input_ids = self.clip_tokenizer(
+            caption,
+            padding="do_not_pad",
+            truncation=True,
+            max_length=self.clip_tokenizer.model_max_length,
+        ).input_ids
+        input_ids_label = self.clip_tokenizer(
+            label,
+            padding="do_not_pad",
+            truncation=True,
+            max_length=self.clip_tokenizer.model_max_length,
+        ).input_ids
+        ctx_begin_pos = len(input_ids) - 1 # exclude eos token
+        ctx_begin_pos_label = len(input_ids_label) - 1 # exclude eos token
+
+        # xxyy format
+        bbox = (row["XMin"], row["YMin"], row["XMax"], row["YMax"])
+        bbox_image = self.crop_bbox(image, bbox, width, height)
+
+        # transform
+        if self.inp_image_transform is not None:
+            inp_image = self.inp_image_transform(image)
+        else:
+            inp_image = None
+        
+        if self.inp_bbox_transform is not None:
+            bbox_inp_image = self.inp_bbox_transform(bbox_image)
+        else:
+            bbox_inp_image = None
+        
+        if self.tgt_image_transform is not None:
+            tgt_image = self.tgt_image_transform(image)
+        else:
+            tgt_image = None
+        
+        if self.tgt_bbox_transform is not None:
+            bbox_tgt_image = self.tgt_bbox_transform(bbox_image)
+        else:
+            bbox_tgt_image = None
+
+        sample = {
+            "image": image,
+            "input_image": inp_image,
+            "target_image": tgt_image,
+            #
+            "bbox_image": bbox_image,
+            "bbox_input_image": bbox_inp_image,
+            "bbox_target_image": bbox_tgt_image,
+            # used by model
+            "caption": caption,
+            "class_name": label,
+            #
+            "input_ids": input_ids,
+            "ctx_begin_pos": ctx_begin_pos,
+            #
+            "input_ids_label": input_ids_label,
+            "ctx_begin_pos_label": ctx_begin_pos_label,
+            # metainfo
+            "image_id": row["ImageID"],
+            "bbox": bbox,
+            "row": row,
+        }
+
+        return sample
+
+    def crop_bbox(self, image, bbox, width, height):
+        xmin, ymin, xmax, ymax = bbox 
+
+        xmin = int(xmin * width)
+        xmax = int(xmax * width)
+        ymin = int(ymin * height)
+        ymax = int(ymax * height)
+
+        xmin = max(0, xmin)
+        ymin = max(0, ymin)
+        xmax = min(image.width, xmax)
+        ymax = min(image.height, ymax)
+
+        return image.crop((xmin, ymin, xmax, ymax))
+
+    def get_label_distribution(self):
+        label_counts = self.annotations["LabelName"].value_counts()
+        label_counts = label_counts.rename(self.cls_id2name)
+
+        return label_counts
+
+    def _isin_forbid_labels(self, label):
+        return self.cls_id2name[label] in self.forbid_labels
+
+    def _create_forbid_labels(self):
+        flabels = set(
+            [
+                # remove all people related labels
+                "Boy",
+                "Girl",
+                "Person",
+                "Man",
+                "Mammal",
+                "Woman",
+                "Human body",
+                "Human head",
+                "Human hair",
+                "Human arm",
+                "Human face",
+                "Human leg",
+                "Human hand",
+                "Human foot",
+                "Human eye",
+                "Human mouth",
+                "Human nose",
+                "Human ear",
+                "Clothing",  # oftentimes contain a human
+                "Suit",  # oftentimes contain a human
+                # "Coat",  # same reason as suit
+                # "Dress",  # same reason as suit
+                "Tree",  # usually hardly contain visual details, e.g. silhouette-like
+                "Plant",  # same reason as tree
+                "Houseplant",  # same reason as tree
+                "Desk",  # can be too crowded with other objects
+                "Table",  # same reason as desk
+                "Poster",  # quite text-heavy, and contain very different visual concepts
+                "Billboard",  # same reason as poster
+            ]
+        )
+
+        return flabels
 
 
 class ImageNetDataset(Dataset):
