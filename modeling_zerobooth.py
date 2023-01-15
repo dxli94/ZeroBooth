@@ -232,6 +232,7 @@ class ZeroBooth(nn.Module):
         eta=1,
         k=125,
         theta=10,
+        neg_prompt="",
         disable_bg_model=False,
         v_condition=False,
     ):
@@ -274,12 +275,14 @@ class ZeroBooth(nn.Module):
 
         if do_classifier_free_guidance:
             max_length = tokenized_prompt.input_ids.shape[-1]
+            print("tokenized_prompt len:", max_length)
 
             if not v_condition:
                 max_length += self.num_query_token
+            print(max_length)
 
             uncond_input = self.tokenizer(
-                [""],
+                [neg_prompt],
                 padding="max_length",
                 max_length=max_length,
                 return_tensors="pt",
@@ -295,7 +298,7 @@ class ZeroBooth(nn.Module):
             if not disable_bg_model:
                 max_length = tokenized_prompt.input_ids.shape[-1]
                 uncond_input = self.tokenizer(
-                    [""],
+                    [neg_prompt],
                     padding="max_length",
                     max_length=max_length,
                     return_tensors="pt",

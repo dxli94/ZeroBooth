@@ -211,13 +211,13 @@ class OpenImageDataset(Dataset):
             max_length=self.clip_tokenizer.model_max_length,
         ).input_ids
         input_ids_label = self.clip_tokenizer(
-            label,
+            f"a {label}",
             padding="do_not_pad",
             truncation=True,
             max_length=self.clip_tokenizer.model_max_length,
         ).input_ids
         ctx_begin_pos = len(input_ids) - 1 # exclude eos token
-        ctx_begin_pos_label = len(input_ids_label) - 1 # exclude eos token
+        ctx_begin_pos_label = 2 # exclude eos token
 
         # xxyy format
         bbox = (row["XMin"], row["YMin"], row["XMax"], row["YMax"])

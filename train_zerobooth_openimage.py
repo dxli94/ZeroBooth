@@ -196,29 +196,52 @@ def main(args):
     def collate_fn(examples):
         # random choice from a "referring" batch and a "completion" batch
         # is_referring = random.choice([True, False])
-        is_referring = random.uniform(0, 1) < 0.5
+        is_two_stage = True
 
-        if is_referring:
-            # in the referring batch:
-            #   - the input image is the full image
-            #   - the target image is the bbox image
-            #   - input caption is "a [v] label"
+        if is_two_stage:
+            is_referring = random.uniform(0, 1) < 0
+            # is_referring = False
+
+            if is_referring:
+                # in the referring batch:
+                #   - the input image is the full image
+                #   - the target image is the bbox image
+                #   - input caption is "a [v] label"
+                # [option 1]
+                input_images_key = "input_image"
+                pixel_values_key = "bbox_target_image"
+                input_id_key = "input_ids_label"
+
+                ctx_begin_pos_key = "ctx_begin_pos_label"
+
+                # [option 2]
+                # input_images_key = "input_image"
+                # pixel_values_key = "target_image"
+                # input_id_key = "input_ids_label"
+
+                # ctx_begin_pos_key = "ctx_begin_pos_label"
+                batch_type = "referring"
+
+            else:  # completion
+                # in the completion batch:
+                #   - the input image is the bbox image
+                #   - the target image is the full image
+                #   - input caption is the full caption + "the [v] is"
+                input_images_key = "bbox_input_image"
+                pixel_values_key = "target_image"
+                input_id_key = "input_ids"
+
+                ctx_begin_pos_key = "ctx_begin_pos"
+
+                batch_type = "completion"
+        else:
             input_images_key = "input_image"
-            pixel_values_key = "bbox_target_image"
+            pixel_values_key = "target_image"
             input_id_key = "input_ids_label"
 
             ctx_begin_pos_key = "ctx_begin_pos_label"
 
-        else:  # completion
-            # in the completion batch:
-            #   - the input image is the bbox image
-            #   - the target image is the full image
-            #   - input caption is the full caption + "the [v] is"
-            input_images_key = "bbox_input_image"
-            pixel_values_key = "target_image"
-            input_id_key = "input_ids"
-
-            ctx_begin_pos_key = "ctx_begin_pos"
+            batch_type = "one-stage"
 
         input_ids = [example[input_id_key] for example in examples]
         ctx_begin_pos = [example[ctx_begin_pos_key] for example in examples]
@@ -252,7 +275,7 @@ def main(args):
             "input_images": input_images,
             "class_names": class_names,
             "ctx_begin_pos": ctx_begin_pos,
-            "batch_type": "referring" if is_referring else "completion",
+            "batch_type": batch_type,
         }
 
         return batch
@@ -374,6 +397,15 @@ def main(args):
     progress_bar.set_description("Steps")
     global_step = 0
 
+    save_to = os.path.join(args.output_dir, f"{global_step}")
+
+    validate(
+        model=unwrap_dist_model(model),
+        transforms=processors,
+        out_dir=os.path.join(save_to, "out_images"),
+        rank=accelerator.process_index,
+    )
+
     # for epoch in range(args.num_train_epochs):
     model.train()
 
@@ -466,62 +498,62 @@ def get_val_dataset():
     ]
 
     prompts = [
-        "a dog swimming in the ocean, the dog is",
-        # "a dog " + ", ".join(["swimming in the ocean"] * 20),
-        "a dog at the grand canyon, photo by National Geographic, the dog is",
-        # "a dog "
-        # + ", ".join(["at the grand canyon, photo by National Geographic"] * 20),
-        "a dog wearing a superman suit, the dog is",
-        "a dog wearing sunglasses, the dog is",
-        # "a dog " + ", ".join(["wearing a superman suit"] * 20),
+        # "a dog swimming in the ocean, the dog is",
+        "a dog " + ", ".join(["swimming in the ocean"] * 20),
+        # "a dog at the grand canyon, photo by National Geographic, the dog is",
+        "a dog "
+        +", ".join(["at the grand canyon, photo by National Geographic"] * 20),
+        # "a dog wearing a superman suit, the dog is",
+        # "a dog wearing sunglasses, the dog is",
+        "a dog " + ", ".join(["wearing a superman suit"] * 20),
+        "a dog " + ", ".join(["wearing a sunglasses"] * 20),
         #
-        # "a dog " + ", ".join(["swimming in the ocean"] * 20),
-        # "a dog "
-        # + ", ".join(["at the grand canyon, photo by National Geographic"] * 20),
-        # "a dog " + ", ".join(["wearing a superman suit"] * 20),
+        "a dog " + ", ".join(["swimming in the ocean"] * 20),
+        # "a dog at the grand canyon, photo by National Geographic, the dog is",
+        "a dog "
+        +", ".join(["at the grand canyon, photo by National Geographic"] * 20),
+        # "a dog wearing a superman suit, the dog is",
+        # "a dog wearing sunglasses, the dog is",
+        "a dog " + ", ".join(["wearing a superman suit"] * 20),
+        "a dog " + ", ".join(["wearing a sunglasses"] * 20),
+        # "a dog wearing a superman suit, the dog is",
+        # "a dog wearing sunglasses, the dog is",
         #
-        "a dog swimming in the ocean, the dog is",
-        # "a dog " + ", ".join(["swimming in the ocean"] * 20),
-        "a dog at the grand canyon, photo by National Geographic, the dog is",
-        # "a dog "
-        # + ", ".join(["at the grand canyon, photo by National Geographic"] * 20),
-        "a dog wearing a superman suit, the dog is",
-        "a dog wearing sunglasses, the dog is",
-        #
-        "a cat swimming in the ocean, the cat is",
-        # "a dog " + ", ".join(["swimming in the ocean"] * 20),
-        "a cat at the grand canyon, photo by National Geographic, the cat is",
-        # "a dog "
-        # + ", ".join(["at the grand canyon, photo by National Geographic"] * 20),
-        "a cat wearing a superman suit, the cat is",
-        "a cat wearing sunglasses, the cat is",
-        # "a cat " + ", ".join(["swimming in the ocean"] * 20),
-        # "a cat "
-        # + ", ".join(["at the grand canyon, photo by National Geographic"] * 20),
-        # "a cat " + ", ".join(["wearing a superman suit"] * 20),
+        # "a cat swimming in the ocean, the cat is",
+        # "a cat at the grand canyon, photo by National Geographic, the cat is",
+        # "a cat wearing a superman suit, the cat is",
+        # "a cat wearing sunglasses, the cat is",
+        "a cat " + ", ".join(["swimming in the ocean"] * 20),
+        "a cat "
+        + ", ".join(["at the grand canyon, photo by National Geographic"] * 20),
+        "a cat " + ", ".join(["wearing a superman suit"] * 20),
+        "a cat " + ", ".join(["wearing a sunglasses"] * 20),
         # #
-        "a flower wreath, award-winning, the flower is",
-        # "a flower " + ", ".join(["wreath, award-winning"] * 20),
+        # "a flower wreath, award-winning, the flower is",
+        "a flower " + ", ".join(["wreath, award-winning"] * 20),
     ]
 
     return img_paths, subj_names, prompts
 
 
-def validate(model, transforms, out_dir, rank):
+def validate(model, transforms, out_dir, rank, debug=False):
+    negative_prompt = "over-exposed, saturated, blur, out of frame, lowres, cropped, worst quality, low quality, jpeg artifacts, morbid, mutilated, out of frame, ugly, bad anatomy, bad proportions, deformed, blurry, duplicate"
+
     from PIL import Image
 
     Path(out_dir).mkdir(parents=True, exist_ok=True)
 
     subj_image_paths, subj_names, prompts = get_val_dataset()
-    ctx_begin_pos = [
-        len(
-            model.tokenizer(
-                prompt,
-                padding="do_not_pad",
-            ).input_ids
-        )
-        - 1 for prompt in prompts
-    ]
+    # ctx_begin_pos = [
+    #     len(
+    #         model.tokenizer(
+    #             prompt,
+    #             padding="do_not_pad",
+    #         ).input_ids
+    #     )
+    #     - 1 for prompt in prompts
+    # ]
+    ctx_begin_pos = [2 for prompt in prompts]
 
     model.eval()
 
@@ -552,9 +584,10 @@ def validate(model, transforms, out_dir, rank):
                 samples,
                 seed=3876998111 + int(rank),
                 guidance_scale=gs,
-                num_inference_steps=250,
+                num_inference_steps=50,
                 theta=theta,
                 disable_bg_model=theta < 0,
+                neg_prompt=negative_prompt,
             )
 
             prompt = prompt.replace(" ", "_")
@@ -562,7 +595,7 @@ def validate(model, transforms, out_dir, rank):
             out_filepath = os.path.join(out_dir, out_filename)
 
             output[0].save(out_filepath)
-
+        
     model.train()
 
 
