@@ -199,7 +199,7 @@ def main(args):
         is_two_stage = True
 
         if is_two_stage:
-            is_referring = random.uniform(0, 1) < 0
+            is_referring = random.uniform(0, 1) < 0.5
             # is_referring = False
 
             if is_referring:
