@@ -495,7 +495,6 @@ def validate(model, transforms, out_dir, rank):
                 guidance_scale=gs,
                 num_inference_steps=250,
                 theta=theta,
-                disable_bg_model=theta < 0,
             )
 
             prompt = prompt.replace(" ", "_")

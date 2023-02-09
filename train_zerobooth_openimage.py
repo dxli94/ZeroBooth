@@ -586,7 +586,6 @@ def validate(model, transforms, out_dir, rank, debug=False):
                 guidance_scale=gs,
                 num_inference_steps=50,
                 theta=theta,
-                disable_bg_model=theta < 0,
                 neg_prompt=negative_prompt,
             )
 

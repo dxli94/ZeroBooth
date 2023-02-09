@@ -3,6 +3,8 @@ import os
 import json
 import pandas as pd
 import random
+import torch
+from tqdm import tqdm
 from torch.utils.data import Dataset
 from PIL import Image
 
@@ -46,6 +48,17 @@ def load_dataset(
             text_transform=text_transform,
             clip_tokenizer=clip_tokenizer,
             split="validation" if "debug" in kwargs and kwargs["debug"] else "train",
+        )
+    elif dataset_name == "imagedir":
+        return ImageDirDataset(
+            inp_image_transform=inp_image_transform,
+            inp_bbox_transform=inp_bbox_transform,
+            tgt_image_transform=tgt_image_transform,
+            tgt_bbox_transform=tgt_bbox_transform,
+            text_transform=text_transform,
+            clip_tokenizer=clip_tokenizer,
+            subject=kwargs["subject"],
+            image_dir=kwargs["image_dir"],
         )
     else:
         raise ValueError(f"Unknown dataset {dataset_name}")
@@ -93,18 +106,22 @@ class OpenImageDataset(Dataset):
         self.img2captions = self._load_captions(capfilt_caption_path)
 
         annotation_path = os.path.join(root_dir, split, annotation_path)
-        filtered_annotation_path = os.path.join(root_dir, split, filtered_annotation_path)
+        filtered_annotation_path = os.path.join(
+            root_dir, split, filtered_annotation_path
+        )
 
         if load_cache and os.path.exists(filtered_annotation_path):
             self.annotations = pd.read_csv(filtered_annotation_path)
             print("All labels:", len(self.annotations))
         else:
-            self.annotations = self._load_annotations(annotation_path, min_size, max_size)
+            self.annotations = self._load_annotations(
+                annotation_path, min_size, max_size
+            )
 
             if save_after_filter:
                 print("Saving filtered labels to", filtered_annotation_path)
                 self.annotations.to_csv(filtered_annotation_path, index=False)
-        
+
     def _load_captions(self, capfilt_caption_path):
         content = json.load(open(capfilt_caption_path))
 
@@ -118,7 +135,7 @@ class OpenImageDataset(Dataset):
 
             if image_id not in img2captions:
                 img2captions[image_id] = dict()
-            
+
             img2captions[image_id][label] = captions
 
         return img2captions
@@ -151,9 +168,13 @@ class OpenImageDataset(Dataset):
         print("After drop duplicates:", len(annotations))
 
         # add class name to labels
-        annotations["LabelString"] = annotations["LabelName"].apply(lambda x: self.cls_id2name[x])
+        annotations["LabelString"] = annotations["LabelName"].apply(
+            lambda x: self.cls_id2name[x]
+        )
         # filter out forbidden labels
-        annotations = annotations[~annotations["LabelName"].apply(self._isin_forbid_labels)]
+        annotations = annotations[
+            ~annotations["LabelName"].apply(self._isin_forbid_labels)
+        ]
         print("After filter out forbidden labels:", len(annotations))
 
         # filter out small objects
@@ -216,29 +237,29 @@ class OpenImageDataset(Dataset):
             truncation=True,
             max_length=self.clip_tokenizer.model_max_length,
         ).input_ids
-        ctx_begin_pos = len(input_ids) - 1 # exclude eos token
-        ctx_begin_pos_label = 2 # exclude eos token
+        ctx_begin_pos = len(input_ids) - 1  # exclude eos token
+        ctx_begin_pos_label = 2  # exclude eos token
 
         # xxyy format
         bbox = (row["XMin"], row["YMin"], row["XMax"], row["YMax"])
-        bbox_image = self.crop_bbox(image, bbox, width, height)
+        bbox_image = crop_bbox(image, bbox, width, height)
 
         # transform
         if self.inp_image_transform is not None:
             inp_image = self.inp_image_transform(image)
         else:
             inp_image = None
-        
+
         if self.inp_bbox_transform is not None:
             bbox_inp_image = self.inp_bbox_transform(bbox_image)
         else:
             bbox_inp_image = None
-        
+
         if self.tgt_image_transform is not None:
             tgt_image = self.tgt_image_transform(image)
         else:
             tgt_image = None
-        
+
         if self.tgt_bbox_transform is not None:
             bbox_tgt_image = self.tgt_bbox_transform(bbox_image)
         else:
@@ -268,21 +289,6 @@ class OpenImageDataset(Dataset):
         }
 
         return sample
-
-    def crop_bbox(self, image, bbox, width, height):
-        xmin, ymin, xmax, ymax = bbox 
-
-        xmin = int(xmin * width)
-        xmax = int(xmax * width)
-        ymin = int(ymin * height)
-        ymax = int(ymax * height)
-
-        xmin = max(0, xmin)
-        ymin = max(0, ymin)
-        xmax = min(image.width, xmax)
-        ymax = min(image.height, ymax)
-
-        return image.crop((xmin, ymin, xmax, ymax))
 
     def get_label_distribution(self):
         label_counts = self.annotations["LabelName"].value_counts()
@@ -656,6 +662,306 @@ class COCODataset(Dataset):
         return self.category_id2name[label_id]
 
 
+class ImageDirDataset(Dataset):
+    def __init__(
+        self,
+        image_dir,
+        subject,
+        annotation_filename="annotations.json",
+        inp_image_transform=None,
+        tgt_image_transform=None,
+        inp_bbox_transform=None,
+        tgt_bbox_transform=None,
+        text_transform=None,
+        clip_tokenizer=None,
+    ):
+        self.image_dir = image_dir
+        self.subject = subject
+
+        image_paths = os.listdir(self.image_dir)
+        # image paths are jpg png webp
+        self.image_paths = [
+            os.path.join(self.image_dir, imp)
+            for imp in image_paths
+            if os.path.splitext(imp)[1][1:]
+            in ["jpg", "png", "webp", "jpeg", "JPG", "PNG", "WEBP", "JPEG"]
+        ]
+
+        # annotation_filepath = os.path.join(image_dir, annotation_filename)
+
+        # if not os.path.exists(annotation_filepath) or force_init_annotations:
+        #     print("Generating annotations...")
+        #     ImageDirDataset.generate_annotations(
+        #         subject, image_dir, annotation_filepath
+        #     )
+
+        self.annotations = json.load(open(os.path.join(image_dir, annotation_filename)))
+        # duplicate annotations for 100 times
+        self.annotations = self.annotations * 100
+
+        self.inp_image_transform = inp_image_transform
+        self.tgt_image_transform = tgt_image_transform
+        self.inp_bbox_transform = inp_bbox_transform
+        self.tgt_bbox_transform = tgt_bbox_transform
+
+        self.text_transform = text_transform
+        self.clip_tokenizer = clip_tokenizer
+
+    def __len__(self):
+        return len(self.annotations)
+
+    def __getitem__(self, index):
+        image_basename = self.annotations[index]["image_path"]
+        image_path = os.path.join(self.image_dir, image_basename)
+        image = Image.open(image_path).convert("RGB")
+        width, height = image.size
+
+        label = self.subject.lower()
+        caption = random.choice(self.annotations[index]["captions"])
+        input_ids = self.clip_tokenizer(
+            caption,
+            padding="do_not_pad",
+            truncation=True,
+            max_length=self.clip_tokenizer.model_max_length,
+        ).input_ids
+        input_ids_label = self.clip_tokenizer(
+            f"a {label}",
+            padding="do_not_pad",
+            truncation=True,
+            max_length=self.clip_tokenizer.model_max_length,
+        ).input_ids
+        ctx_begin_pos = len(input_ids) - 1  # exclude eos token
+        ctx_begin_pos_label = 2  # exclude eos token
+
+        bbox = tuple(self.annotations[index]["bbox"])
+        bbox_image = crop_bbox(image, bbox, width, height)
+
+        # transform
+        if self.inp_image_transform is not None:
+            inp_image = self.inp_image_transform(image)
+        else:
+            inp_image = image
+
+        if self.inp_bbox_transform is not None:
+            bbox_inp_image = self.inp_bbox_transform(bbox_image)
+        else:
+            bbox_inp_image = bbox_image
+
+        if self.tgt_image_transform is not None:
+            tgt_image = self.tgt_image_transform(image)
+        else:
+            tgt_image = image
+
+        if self.tgt_bbox_transform is not None:
+            bbox_tgt_image = self.tgt_bbox_transform(bbox_image)
+        else:
+            bbox_tgt_image = bbox_image
+
+        sample = {
+            #
+            "image": image,
+            "input_image": inp_image,
+            "target_image": tgt_image,
+            #
+            "bbox_image": bbox_image,
+            "bbox_input_image": bbox_inp_image,
+            "bbox_target_image": bbox_tgt_image,
+            # used by model
+            "caption": caption,
+            "class_name": label,
+            #
+            "input_ids": input_ids,
+            "ctx_begin_pos": ctx_begin_pos,
+            #
+            "input_ids_label": input_ids_label,
+            "ctx_begin_pos_label": ctx_begin_pos_label,
+            # metainfo
+            "bbox": bbox,
+        }
+
+        return sample
+
+    @classmethod
+    def generate_annotations(
+        cls, subject, image_dir, annotation_path, n_caps=20, skip_if_exists=True
+    ):
+        if skip_if_exists and os.path.exists(annotation_path):
+            return
+
+        annotations = []
+
+        image_paths = os.listdir(image_dir)
+        # image paths are jpg png webp
+        image_paths = [
+            os.path.join(image_dir, imp)
+            for imp in image_paths
+            if os.path.splitext(imp)[1][1:]
+            in ["jpg", "png", "webp", "jpeg", "JPG", "PNG", "WEBP", "JPEG"]
+        ]
+
+        captions = cls._generate_captions(image_paths, subject, n_caps=n_caps)
+        bbox = cls._generate_bbox(image_paths, subject)
+
+        for image_path, caption, box in zip(image_paths, captions, bbox):
+            ann = {
+                "image_path": os.path.basename(image_path),
+                "captions": caption,
+                "bbox": box,
+            }
+
+            annotations.append(ann)
+
+        with open(annotation_path, "w") as f:
+            json.dump(annotations, f)
+
+    @classmethod
+    def _generate_captions(cls, image_paths, subject, n_caps):
+        from lavis.models import load_model
+        from lavis.models.clip_models.tokenizer import tokenize as clip_tokenize
+        from torchvision import transforms
+        from torchvision.transforms.functional import InterpolationMode
+        import torch.nn.functional as F
+
+        with torch.no_grad():
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+            model_captioner = load_model(
+                name="blip_caption",
+                model_type="large_coco",
+                device=device,
+                is_eval=True,
+            )
+            model_filter = load_model(
+                name="clip", model_type="ViT-L-14", device=device, is_eval=True
+            )
+
+            normalize = transforms.Normalize(
+                (0.48145466, 0.4578275, 0.40821073),
+                (0.26862954, 0.26130258, 0.27577711),
+            )
+            transform_blip = transforms.Compose(
+                [
+                    transforms.Resize(
+                        (384, 384), interpolation=InterpolationMode.BICUBIC
+                    ),
+                    transforms.ToTensor(),
+                    normalize,
+                ]
+            )
+            transform_clip = transforms.Compose(
+                [
+                    transforms.Resize(224, interpolation=InterpolationMode.BICUBIC),
+                    transforms.CenterCrop(224),
+                    transforms.ToTensor(),
+                    normalize,
+                ]
+            )
+
+            print("Generating captions for {} images...".format(len(image_paths)))
+            all_caps = []
+            for image_path in tqdm(image_paths):
+                image = Image.open(image_path).convert("RGB")
+
+                image_blip = (
+                    transform_blip(image).to(device, non_blocking=True).unsqueeze(0)
+                )
+                image_clip = (
+                    transform_clip(image).to(device, non_blocking=True).unsqueeze(0)
+                )
+
+                captions_blip = model_captioner.generate(
+                    samples={"image": image_blip},
+                    use_nucleus_sampling=True,
+                    top_p=0.95,
+                    min_length=5,
+                    num_captions=n_caps,
+                )
+
+                tokens_blip = clip_tokenize(captions_blip).to(device)
+                image_features = F.normalize(
+                    model_filter.encode_image(image_clip), dim=-1
+                )
+                text_features_blip = F.normalize(
+                    model_filter.encode_text(tokens_blip), dim=-1
+                )
+
+                sim_blip = torch.bmm(
+                    image_features.unsqueeze(1),
+                    text_features_blip.view(image_blip.size(0), n_caps, -1).permute(
+                        0, 2, 1
+                    ),
+                )
+
+                _, indices = torch.topk(sim_blip, k=n_caps, dim=-1)
+                caps = [
+                    "{}, the {} is".format(captions_blip[n], subject)
+                    for n in indices[0][0]
+                ][:10]
+
+                all_caps.append(caps)
+
+        return all_caps
+
+    @classmethod
+    def _generate_bbox(cls, image_paths, subject):
+        from transformers import OwlViTProcessor, OwlViTForObjectDetection
+
+        processor = OwlViTProcessor.from_pretrained("google/owlvit-base-patch32")
+        model = OwlViTForObjectDetection.from_pretrained("google/owlvit-base-patch32")
+
+        with torch.no_grad():
+            # TODO may worth batching this
+            print("Generating bounding boxes for {} images...".format(len(image_paths)))
+            bounding_boxes = []
+            for image_path in tqdm(image_paths):
+                image = Image.open(image_path).convert("RGB")
+                texts = [["A photo of a {}".format(subject)]]
+
+                inputs = processor(
+                    texts,
+                    images=image,
+                    return_tensors="pt",
+                )
+
+                outputs = model(**inputs)
+
+                target_sizes = torch.ones_like(torch.Tensor([image.size[::-1]]))
+                # Convert outputs (bounding boxes and class logits) to COCO API
+                results = processor.post_process(
+                    outputs=outputs, target_sizes=target_sizes
+                )
+
+                i = 0  # Retrieve predictions for the first image for the corresponding text queries
+                text = texts[i]
+                boxes, scores, labels = (
+                    results[i]["boxes"],
+                    results[i]["scores"],
+                    results[i]["labels"],
+                )
+
+                score_threshold = 0.1
+                after_filtering = []
+
+                for box, score, label in zip(boxes, scores, labels):
+                    box = [round(i, 2) for i in box.tolist()]
+                    if score >= score_threshold:
+                        print(
+                            f"Detected {text[label]} with confidence {round(score.item(), 3)} at location {box}"
+                        )
+
+                        after_filtering.append((box, score.item()))
+
+                if len(after_filtering) == 0:
+                    after_filtering.append(([0, 0, 1, 1], -1))
+
+                after_filtering = sorted(
+                    after_filtering, key=lambda x: x[1], reverse=True
+                )[:1]
+                bounding_boxes.append(after_filtering[0][0])
+
+        return bounding_boxes
+
+
 class IterLoader:
     """
     A wrapper to convert DataLoader as an infinite iterator.
@@ -694,12 +1000,42 @@ class IterLoader:
         return len(self._dataloader)
 
 
+def crop_bbox(image, bbox, width, height):
+    xmin, ymin, xmax, ymax = bbox
+
+    xmin = int(xmin * width)
+    xmax = int(xmax * width)
+    ymin = int(ymin * height)
+    ymax = int(ymax * height)
+
+    xmin = max(0, xmin)
+    ymin = max(0, ymin)
+    xmax = min(image.width, xmax)
+    ymax = min(image.height, ymax)
+
+    return image.crop((xmin, ymin, xmax, ymax))
+
+
 if __name__ == "__main__":
-    dataset = COCODataset(
-        inp_image_transform=lambda x: x,
-        tgt_image_transform=lambda x: x,
-        text_transform=lambda x: x,
-        clip_tokenizer=lambda x: x,
+    # dataset = COCODataset(
+    #     inp_image_transform=lambda x: x,
+    #     tgt_image_transform=lambda x: x,
+    #     text_transform=lambda x: x,
+    #     clip_tokenizer=lambda x: x,
+    # )
+
+    # print(len(dataset))
+
+    imagedir_dataset = ImageDirDataset(
+        image_dir="/export/home/workspace/dreambooth/diffusers/data/alvan-nee",
+        subject="dog",
     )
 
-    print(len(dataset))
+    # ImageDirDataset.generate_annotations(
+    #     image_dir="/export/home/workspace/dreambooth/diffusers/data/alvan-nee",
+    #     subject="dog",
+    # )
+
+    import pdb
+
+    pdb.set_trace()
