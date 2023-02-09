@@ -78,17 +78,6 @@ class BLIP(nn.Module):
         )
         self.query_tokens.data.normal_(mean=0.0, std=encoder_config.initializer_range)
 
-        # self.vision_proj = nn.Linear(
-        #     self.text_model.config.hidden_size, config["embed_dim"]
-        # )
-        # self.text_proj = nn.Linear(
-        #     self.text_model.config.hidden_size, config["embed_dim"]
-        # )
-
-        # self.itm_head = nn.Linear(encoder_config.hidden_size, 2)
-
-        # self.temp = nn.Parameter(0.07 * torch.ones([]))
-
         self.max_text_length = config["max_text_length"]
 
         if "pretrained" in config:
