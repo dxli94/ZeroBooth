@@ -182,7 +182,15 @@ class ZeroBooth(nn.Module):
 
         # Predict the noise residual
         noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states).sample
-        loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
+
+        if batch["batch_type"] == "referring":
+            mask = batch["bbox_mask"]
+            mask = F.interpolate(mask, scale_factor=0.125, mode="bicubic")
+            # apply mask to loss
+            loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="none")
+            loss = (loss * mask).mean()
+        else:
+            loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
 
         return loss
 

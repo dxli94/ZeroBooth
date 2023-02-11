@@ -256,6 +256,7 @@ def main(args):
             .float()
         )
 
+        bbox_masks = torch.stack([example["bbox_mask"] for example in examples]).float()
         input_ids = (
             unwrap_dist_model(model)
             .tokenizer.pad(
@@ -273,6 +274,7 @@ def main(args):
             "input_ids": input_ids,
             "pixel_values": pixel_values,
             "input_images": input_images,
+            "bbox_mask": bbox_masks,
             "class_names": class_names,
             "ctx_begin_pos": ctx_begin_pos,
             "batch_type": batch_type,
@@ -399,12 +401,12 @@ def main(args):
 
     save_to = os.path.join(args.output_dir, f"{global_step}")
 
-    validate(
-        model=unwrap_dist_model(model),
-        transforms=processors,
-        out_dir=os.path.join(save_to, "out_images"),
-        rank=accelerator.process_index,
-    )
+    # validate(
+    #     model=unwrap_dist_model(model),
+    #     transforms=processors,
+    #     out_dir=os.path.join(save_to, "out_images"),
+    #     rank=accelerator.process_index,
+    # )
 
     # for epoch in range(args.num_train_epochs):
     model.train()

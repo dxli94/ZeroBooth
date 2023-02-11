@@ -1,6 +1,7 @@
 # output_dir: "output/pretrain-20221230-unet-textenc-coco-v1.5"
 # output_dir: "output/pretrain-20230111-openimage-complete-only"
-output_dir: "output/pretrain-20230208-unet-textenc-v1.5"
+# output_dir: "output/pretrain-20230208-unet-textenc-v1.5"
+output_dir: "output/pretrain-20230211-unet-textenc-v1.5"
 logging_dir: "logs"
 
 seed: 1337
@@ -57,7 +58,7 @@ adam_epsilon: 1e-08
 max_grad_norm: 20.0
 mixed_precision: "no"  # ["no", "fp16", "bf16"] 
 
-max_train_steps: 60000
+max_train_steps: 70000
 save_steps: 5000
 logging_steps: 200
 
