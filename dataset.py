@@ -1,12 +1,14 @@
-import time
-import os
 import json
-import pandas as pd
+import os
 import random
+import time
+
+import pandas as pd
 import torch
-from tqdm import tqdm
-from torch.utils.data import Dataset
 from PIL import Image
+from torch.utils.data import Dataset
+from torchvision import transforms
+from tqdm import tqdm
 
 
 def load_dataset(
@@ -17,6 +19,7 @@ def load_dataset(
     clip_tokenizer,
     inp_bbox_transform,
     tgt_bbox_transform,
+    msk_bbox_transform,
     **kwargs,
 ):
     if dataset_name == "imagenet":
@@ -45,6 +48,7 @@ def load_dataset(
             inp_bbox_transform=inp_bbox_transform,
             tgt_image_transform=tgt_image_transform,
             tgt_bbox_transform=tgt_bbox_transform,
+            msk_bbox_transform=msk_bbox_transform,
             text_transform=text_transform,
             clip_tokenizer=clip_tokenizer,
             split="validation" if "debug" in kwargs and kwargs["debug"] else "train",
@@ -71,11 +75,13 @@ class OpenImageDataset(Dataset):
         tgt_image_transform=None,
         inp_bbox_transform=None,
         tgt_bbox_transform=None,
+        msk_bbox_transform=None,
         text_transform=None,
         clip_tokenizer=None,
         root_dir="/export/share/dongxuli/fiftyone/open-images-v6",
         split="validation",
         imagedir_path="data",
+        maskdir="/export/home/workspace/dreambooth/diffusers/data/openimage-mask/",
         annotation_path="labels/detections.csv",
         filtered_annotation_path="labels/detections_filtered.csv",
         cls_mapping_path="metadata/classes.csv",
@@ -92,12 +98,16 @@ class OpenImageDataset(Dataset):
         self.tgt_image_transform = tgt_image_transform
         self.tgt_bbox_transform = tgt_bbox_transform
 
+        self.msk_bbox_transform = msk_bbox_transform
+
         self.text_transform = text_transform
         self.clip_tokenizer = clip_tokenizer
 
         self.root_dir = root_dir
         self.split = split
+
         self.imagedir_path = os.path.join(root_dir, split, imagedir_path)
+        self.maskdir_path = os.path.join(maskdir, split)
 
         self.cls_id2name = self._load_cls_id2name(cls_mapping_path)
         self.forbid_labels = self._create_forbid_labels()
@@ -244,6 +254,10 @@ class OpenImageDataset(Dataset):
         bbox = (row["XMin"], row["YMin"], row["XMax"], row["YMax"])
         bbox_image = crop_bbox(image, bbox, width, height)
 
+        bbox_mask_filename = row["ImageID"] + "_" + label + ".jpg"
+        bbox_mask_path = os.path.join(self.maskdir_path, bbox_mask_filename)
+        bbox_mask = Image.open(bbox_mask_path).convert("L")
+
         # transform
         if self.inp_image_transform is not None:
             inp_image = self.inp_image_transform(image)
@@ -262,6 +276,7 @@ class OpenImageDataset(Dataset):
 
         if self.tgt_bbox_transform is not None:
             bbox_tgt_image = self.tgt_bbox_transform(bbox_image)
+            bbox_mask = self.msk_bbox_transform(bbox_mask)
         else:
             bbox_tgt_image = None
 
@@ -273,6 +288,7 @@ class OpenImageDataset(Dataset):
             "bbox_image": bbox_image,
             "bbox_input_image": bbox_inp_image,
             "bbox_target_image": bbox_tgt_image,
+            "bbox_mask": bbox_mask,
             # used by model
             "caption": caption,
             "class_name": label,
@@ -816,11 +832,12 @@ class ImageDirDataset(Dataset):
 
     @classmethod
     def _generate_captions(cls, image_paths, subject, n_caps):
+        import torch.nn.functional as F
         from lavis.models import load_model
-        from lavis.models.clip_models.tokenizer import tokenize as clip_tokenize
+        from lavis.models.clip_models.tokenizer import \
+            tokenize as clip_tokenize
         from torchvision import transforms
         from torchvision.transforms.functional import InterpolationMode
-        import torch.nn.functional as F
 
         with torch.no_grad():
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -904,7 +921,7 @@ class ImageDirDataset(Dataset):
 
     @classmethod
     def _generate_bbox(cls, image_paths, subject):
-        from transformers import OwlViTProcessor, OwlViTForObjectDetection
+        from transformers import OwlViTForObjectDetection, OwlViTProcessor
 
         processor = OwlViTProcessor.from_pretrained("google/owlvit-base-patch32")
         model = OwlViTForObjectDetection.from_pretrained("google/owlvit-base-patch32")

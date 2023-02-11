@@ -110,6 +110,16 @@ def create_transforms(config):
         ]
     )
 
+    msk_bbox_transform = transforms.Compose(
+        [
+            transforms.Resize(
+                config.tgt_image_size, interpolation=InterpolationMode.BICUBIC
+            ),
+            transforms.CenterCrop(config.tgt_image_size),
+            transforms.ToTensor(),
+        ]
+    )
+
     text_transform = BlipCaptionProcessor()
 
     return {
@@ -117,6 +127,7 @@ def create_transforms(config):
         "tgt_image_transform": tgt_image_transform,
         "inp_bbox_transform": inp_bbox_transform,
         "tgt_bbox_transform": tgt_bbox_transform,
+        "msk_bbox_transform": msk_bbox_transform,
         "text_transform": text_transform,
     }
 
@@ -290,6 +301,7 @@ def main(args):
         inp_bbox_transform=processors["inp_bbox_transform"],
         tgt_image_transform=processors["tgt_image_transform"],
         tgt_bbox_transform=processors["tgt_bbox_transform"],
+        msk_bbox_transform=processors["msk_bbox_transform"],
         text_transform=processors["text_transform"],
         clip_tokenizer=model.tokenizer,
         debug=input_args.debug,
