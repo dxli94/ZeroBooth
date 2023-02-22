@@ -81,11 +81,13 @@ class OpenImageDataset(Dataset):
         root_dir="/export/share/dongxuli/fiftyone/open-images-v6",
         split="validation",
         imagedir_path="data",
-        maskdir="/export/home/workspace/dreambooth/diffusers/data/openimage-mask/",
+        maskdir="/export/home/workspace/dreambooth/diffusers/data/openimage-mask-full/",
+        bbox_imagedir="/export/home/workspace/dreambooth/diffusers/data/openimage-image-syn/",
         annotation_path="labels/detections.csv",
         filtered_annotation_path="labels/detections_filtered.csv",
         cls_mapping_path="metadata/classes.csv",
-        capfilt_caption_path="labels/capfilt2.json",
+        # capfilt_caption_path="labels/capfilt2.json",
+        capfilt_caption_path="labels/capfilt_opt6b7.json",
         load_cache=True,
         save_after_filter=False,
         min_size=0.30,
@@ -108,6 +110,7 @@ class OpenImageDataset(Dataset):
 
         self.imagedir_path = os.path.join(root_dir, split, imagedir_path)
         self.maskdir_path = os.path.join(maskdir, split)
+        self.bbox_syndir_path = os.path.join(bbox_imagedir, split)
 
         self.cls_id2name = self._load_cls_id2name(cls_mapping_path)
         self.forbid_labels = self._create_forbid_labels()
@@ -239,7 +242,7 @@ class OpenImageDataset(Dataset):
             caption,
             padding="do_not_pad",
             truncation=True,
-            max_length=self.clip_tokenizer.model_max_length,
+            max_length=self.clip_tokenizer.model_max_length - 16,
         ).input_ids
         input_ids_label = self.clip_tokenizer(
             f"a {label}",
@@ -258,6 +261,10 @@ class OpenImageDataset(Dataset):
         bbox_mask_path = os.path.join(self.maskdir_path, bbox_mask_filename)
         bbox_mask = Image.open(bbox_mask_path).convert("L")
 
+        bbox_image_syn = os.path.join(self.bbox_syndir_path, bbox_mask_filename)
+        bbox_image_syn = Image.open(bbox_image_syn).convert("RGB")
+        bbox_image_syn = crop_bbox(bbox_image_syn, bbox, bbox_image_syn.size[0], bbox_image_syn.size[1])
+
         # transform
         if self.inp_image_transform is not None:
             inp_image = self.inp_image_transform(image)
@@ -265,7 +272,8 @@ class OpenImageDataset(Dataset):
             inp_image = None
 
         if self.inp_bbox_transform is not None:
-            bbox_inp_image = self.inp_bbox_transform(bbox_image)
+            # bbox_inp_image = self.inp_bbox_transform(bbox_image)
+            bbox_inp_image = self.inp_bbox_transform(bbox_image_syn)
         else:
             bbox_inp_image = None
 
@@ -281,11 +289,13 @@ class OpenImageDataset(Dataset):
             bbox_tgt_image = None
 
         sample = {
+            # "image_path": bbox_mask_filename,
             "image": image,
             "input_image": inp_image,
             "target_image": tgt_image,
             #
             "bbox_image": bbox_image,
+            "bbox_image_syn": bbox_image_syn,
             "bbox_input_image": bbox_inp_image,
             "bbox_target_image": bbox_tgt_image,
             "bbox_mask": bbox_mask,
@@ -431,7 +441,7 @@ class ImageNetDataset(Dataset):
         if self.debug:
             dataset = load_dataset(
                 name="imagenet",
-                cfg_path="/export/home/workspace/LAVIS/lavis/configs/datasets/imagenet/defaults_val.yaml",
+                # cfg_path="/export/home/workspace/LAVIS/lavis/configs/datasets/imagenet/defaults_val.yaml",
             )["val"]
         else:
             dataset = load_dataset("imagenet")["train"]
