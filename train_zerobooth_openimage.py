@@ -604,7 +604,6 @@ def validate(model, transforms, out_dir, rank, debug=False):
                 seed=3876998111 + int(rank),
                 guidance_scale=gs,
                 num_inference_steps=50,
-                theta=theta,
                 neg_prompt=negative_prompt,
             )
 
