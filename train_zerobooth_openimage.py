@@ -192,6 +192,11 @@ def main(args):
     processors = create_transforms(config)
     model = ZeroBooth(config=config.model)
 
+    # load checkpoint
+    if args.checkpoint is not None:
+        print("loading checkpoint: ", config.checkpoint)
+        model.load_checkpoint(config.checkpoint)
+
     optimizer_class = torch.optim.AdamW
     model_params = model.parameters()
 
@@ -210,7 +215,7 @@ def main(args):
         is_two_stage = True
 
         if is_two_stage:
-            is_referring = random.uniform(0, 1) < 0.5
+            is_referring = random.uniform(0, 1) < args.refer_ratio
             # is_referring = False
 
             if is_referring:
