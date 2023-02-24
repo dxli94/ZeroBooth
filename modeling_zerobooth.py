@@ -193,6 +193,27 @@ class ZeroBooth(nn.Module):
             loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
 
         return loss
+    
+    def apply_weights(self, text_embeddings, embedding_weights, ctx_begin_pos):
+        subj_weight = embedding_weights[0]
+        prpt_weight = embedding_weights[1]
+
+        ctx_begin_pos = ctx_begin_pos[0]
+
+        prev_mean = text_embeddings.mean(axis=[1, 2])
+
+        cur_text_embeddings = text_embeddings.clone()
+
+        cur_text_embeddings[0, :ctx_begin_pos] *= prpt_weight
+        cur_text_embeddings[0, ctx_begin_pos + self.num_query_token:] *= prpt_weight
+        cur_text_embeddings[0, ctx_begin_pos: ctx_begin_pos + self.num_query_token] *= subj_weight
+
+        cur_mean = cur_text_embeddings.mean(axis=[1, 2])
+
+        # ensure the mean is the same
+        cur_text_embeddings *= prev_mean / cur_mean
+
+        return cur_text_embeddings
 
     @torch.no_grad()
     def generate(
@@ -204,10 +225,8 @@ class ZeroBooth(nn.Module):
         seed=42,
         num_inference_steps=250,
         eta=1,
-        k=125,
-        theta=10,
         neg_prompt="",
-        v_condition=False,
+        embedding_weights=None
     ):
 
         input_image = samples["input_images"]  # reference image
@@ -230,6 +249,9 @@ class ZeroBooth(nn.Module):
             # ctx_begin_pos=[2],
             ctx_begin_pos=samples["ctx_begin_pos"],
         )[0]
+
+        if embedding_weights is not None:
+            text_embeddings = self.apply_weights(text_embeddings, embedding_weights, samples["ctx_begin_pos"])
 
         # 3. unconditional embedding
         do_classifier_free_guidance = guidance_scale > 1.0
