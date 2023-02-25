@@ -193,7 +193,7 @@ def main(args):
     model = ZeroBooth(config=config.model)
 
     # load checkpoint
-    if args.checkpoint is not None:
+    if hasattr(args, "checkpoint") and args.checkpoint is not None:
         print("loading checkpoint: ", config.checkpoint)
         model.load_checkpoint(config.checkpoint)
 
