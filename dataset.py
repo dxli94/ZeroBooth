@@ -56,9 +56,7 @@ def load_dataset(
     elif dataset_name == "imagedir":
         return ImageDirDataset(
             inp_image_transform=inp_image_transform,
-            inp_bbox_transform=inp_bbox_transform,
             tgt_image_transform=tgt_image_transform,
-            tgt_bbox_transform=tgt_bbox_transform,
             text_transform=text_transform,
             clip_tokenizer=clip_tokenizer,
             subject=kwargs["subject"],
@@ -696,8 +694,8 @@ class ImageDirDataset(Dataset):
         annotation_filename="annotations.json",
         inp_image_transform=None,
         tgt_image_transform=None,
-        inp_bbox_transform=None,
-        tgt_bbox_transform=None,
+        # inp_bbox_transform=None,
+        # tgt_bbox_transform=None,
         text_transform=None,
         clip_tokenizer=None,
     ):
@@ -722,13 +720,13 @@ class ImageDirDataset(Dataset):
         #     )
 
         self.annotations = json.load(open(os.path.join(image_dir, annotation_filename)))
-        # duplicate annotations for 100 times
-        self.annotations = self.annotations * 100
+        # a hacky way to create infinite long dataset
+        self.annotations = self.annotations * 100000
 
         self.inp_image_transform = inp_image_transform
         self.tgt_image_transform = tgt_image_transform
-        self.inp_bbox_transform = inp_bbox_transform
-        self.tgt_bbox_transform = tgt_bbox_transform
+        # self.inp_bbox_transform = inp_bbox_transform
+        # self.tgt_bbox_transform = tgt_bbox_transform
 
         self.text_transform = text_transform
         self.clip_tokenizer = clip_tokenizer
@@ -759,8 +757,8 @@ class ImageDirDataset(Dataset):
         ctx_begin_pos = len(input_ids) - 1  # exclude eos token
         ctx_begin_pos_label = 2  # exclude eos token
 
-        bbox = tuple(self.annotations[index]["bbox"])
-        bbox_image = crop_bbox(image, bbox, width, height)
+        # bbox = tuple(self.annotations[index]["bbox"])
+        # bbox_image = crop_bbox(image, bbox, width, height)
 
         # transform
         if self.inp_image_transform is not None:
@@ -768,20 +766,20 @@ class ImageDirDataset(Dataset):
         else:
             inp_image = image
 
-        if self.inp_bbox_transform is not None:
-            bbox_inp_image = self.inp_bbox_transform(bbox_image)
-        else:
-            bbox_inp_image = bbox_image
+        # if self.inp_bbox_transform is not None:
+        #     bbox_inp_image = self.inp_bbox_transform(bbox_image)
+        # else:
+        #     bbox_inp_image = bbox_image
 
         if self.tgt_image_transform is not None:
             tgt_image = self.tgt_image_transform(image)
         else:
             tgt_image = image
 
-        if self.tgt_bbox_transform is not None:
-            bbox_tgt_image = self.tgt_bbox_transform(bbox_image)
-        else:
-            bbox_tgt_image = bbox_image
+        # if self.tgt_bbox_transform is not None:
+        #     bbox_tgt_image = self.tgt_bbox_transform(bbox_image)
+        # else:
+        #     bbox_tgt_image = bbox_image
 
         sample = {
             #
@@ -789,9 +787,9 @@ class ImageDirDataset(Dataset):
             "input_image": inp_image,
             "target_image": tgt_image,
             #
-            "bbox_image": bbox_image,
-            "bbox_input_image": bbox_inp_image,
-            "bbox_target_image": bbox_tgt_image,
+            # "bbox_image": bbox_image,
+            # "bbox_input_image": bbox_inp_image,
+            # "bbox_target_image": bbox_tgt_image,
             # used by model
             "caption": caption,
             "class_name": label,
@@ -802,7 +800,7 @@ class ImageDirDataset(Dataset):
             "input_ids_label": input_ids_label,
             "ctx_begin_pos_label": ctx_begin_pos_label,
             # metainfo
-            "bbox": bbox,
+            # "bbox": bbox,
         }
 
         return sample
@@ -826,13 +824,12 @@ class ImageDirDataset(Dataset):
         ]
 
         captions = cls._generate_captions(image_paths, subject, n_caps=n_caps)
-        bbox = cls._generate_bbox(image_paths, subject)
+        # bbox = cls._generate_bbox(image_paths, subject)
 
-        for image_path, caption, box in zip(image_paths, captions, bbox):
+        for image_path, caption in zip(image_paths, captions):
             ann = {
                 "image_path": os.path.basename(image_path),
                 "captions": caption,
-                "bbox": box,
             }
 
             annotations.append(ann)
@@ -928,66 +925,6 @@ class ImageDirDataset(Dataset):
                 all_caps.append(caps)
 
         return all_caps
-
-    @classmethod
-    def _generate_bbox(cls, image_paths, subject):
-        from transformers import OwlViTForObjectDetection, OwlViTProcessor
-
-        processor = OwlViTProcessor.from_pretrained("google/owlvit-base-patch32")
-        model = OwlViTForObjectDetection.from_pretrained("google/owlvit-base-patch32")
-
-        with torch.no_grad():
-            # TODO may worth batching this
-            print("Generating bounding boxes for {} images...".format(len(image_paths)))
-            bounding_boxes = []
-            for image_path in tqdm(image_paths):
-                image = Image.open(image_path).convert("RGB")
-                texts = [["A photo of a {}".format(subject)]]
-
-                inputs = processor(
-                    texts,
-                    images=image,
-                    return_tensors="pt",
-                )
-
-                outputs = model(**inputs)
-
-                target_sizes = torch.ones_like(torch.Tensor([image.size[::-1]]))
-                # Convert outputs (bounding boxes and class logits) to COCO API
-                results = processor.post_process(
-                    outputs=outputs, target_sizes=target_sizes
-                )
-
-                i = 0  # Retrieve predictions for the first image for the corresponding text queries
-                text = texts[i]
-                boxes, scores, labels = (
-                    results[i]["boxes"],
-                    results[i]["scores"],
-                    results[i]["labels"],
-                )
-
-                score_threshold = 0.1
-                after_filtering = []
-
-                for box, score, label in zip(boxes, scores, labels):
-                    box = [round(i, 2) for i in box.tolist()]
-                    if score >= score_threshold:
-                        print(
-                            f"Detected {text[label]} with confidence {round(score.item(), 3)} at location {box}"
-                        )
-
-                        after_filtering.append((box, score.item()))
-
-                if len(after_filtering) == 0:
-                    after_filtering.append(([0, 0, 1, 1], -1))
-
-                after_filtering = sorted(
-                    after_filtering, key=lambda x: x[1], reverse=True
-                )[:1]
-                bounding_boxes.append(after_filtering[0][0])
-
-        return bounding_boxes
-
 
 class IterLoader:
     """
