@@ -2,6 +2,7 @@ import os
 import inspect
 import tqdm
 
+import random
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -98,7 +99,8 @@ class ZeroBooth(nn.Module):
         )
 
         self.noise_scheduler = DDPMScheduler.from_config(
-            "CompVis/stable-diffusion-v1-4", subfolder="scheduler"
+            config["pretrained_model_name_or_path"],
+            subfolder="scheduler"
         )
 
         self.freeze_modules()
@@ -168,9 +170,15 @@ class ZeroBooth(nn.Module):
             text=batch["class_names"],
         )
 
-        # projected as clip text embeddings
-        blip_embeddings = blip_embeddings[:, : self.num_query_token, :]
-        ctx_embeddings = self.proj_layer(blip_embeddings)
+        # for 15% of the time, we not use the blip embeddings
+        enable_ctx = random.random() > 0.15
+
+        if enable_ctx:
+            # projected as clip text embeddings
+            blip_embeddings = blip_embeddings[:, : self.num_query_token, :]
+            ctx_embeddings = self.proj_layer(blip_embeddings)
+        else:
+            ctx_embeddings = None
 
         # Get the text embedding for conditioning
         # TODO make it configurable rather than hardcoding 2 (2 = len(["[pad]", "a"])
@@ -184,11 +192,12 @@ class ZeroBooth(nn.Module):
         noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states).sample
 
         if batch["batch_type"] == "referring":
-            mask = batch["bbox_mask"]
-            mask = F.interpolate(mask, scale_factor=0.125, mode="bicubic")
-            # apply mask to loss
-            loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="none")
-            loss = (loss * mask).mean()
+            # mask = batch["bbox_mask"]
+            # mask = F.interpolate(mask, scale_factor=0.125, mode="bicubic")
+            # # apply mask to loss
+            # loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="none")
+            # loss = (loss * mask).mean()
+            raise NotImplementedError("Referring task is deprecated.")
         else:
             loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
 
