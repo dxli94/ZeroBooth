@@ -369,6 +369,7 @@ class ZeroBooth(nn.Module):
         eta=1,
         neg_prompt="",
         prompt_edit_token_weights=[],
+        disable_subject=False
     ):
 
         input_image = samples["input_images"]  # reference image
@@ -378,9 +379,12 @@ class ZeroBooth(nn.Module):
         scheduler = self.eval_noise_scheduler
 
         # 1. extract BLIP query features and proj to text space -> (bs, 32, 768)
-        query_embeds = self.blip(image=input_image, text=text_input)
-        query_embeds = query_embeds[:, : self.num_query_token, :]
-        query_embeds = self.proj_layer(query_embeds)
+        if not disable_subject:
+            query_embeds = self.blip(image=input_image, text=text_input)
+            query_embeds = query_embeds[:, : self.num_query_token, :]
+            query_embeds = self.proj_layer(query_embeds)
+        else:
+            query_embeds = None
 
         # 2. embeddings for prompt, with query_embeds as context
         tokenized_prompt = self.tokenize_text(prompt).to(self.device)
