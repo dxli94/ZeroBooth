@@ -80,7 +80,7 @@ class OpenImageDataset(Dataset):
         split="validation",
         imagedir_path="data",
         maskdir="/export/home/workspace/dreambooth/diffusers/data/openimage-mask-full/",
-        bbox_imagedir="/export/home/workspace/dreambooth/diffusers/data/openimage-image-syn/",
+        bbox_imagedir="/export/home/workspace/dreambooth/diffusers/data/openimage-image-syn-matting/",
         annotation_path="labels/detections.csv",
         filtered_annotation_path="labels/detections_filtered.csv",
         cls_mapping_path="metadata/classes.csv",
@@ -287,7 +287,7 @@ class OpenImageDataset(Dataset):
             bbox_tgt_image = None
 
         sample = {
-            # "image_path": bbox_mask_filename,
+            "image_path": bbox_mask_filename,
             "image": image,
             "input_image": inp_image,
             "target_image": tgt_image,
