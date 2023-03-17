@@ -395,8 +395,9 @@ def main(args):
             print(f"Saving model at step {global_step}.")
             save_to = os.path.join(args.output_dir, f"{global_step}")
 
-            if accelerator.is_main_process:
-                unwrap_dist_model(model).save_checkpoint(save_to, accelerator)
+            if hasattr(args, "save_model") and args.save_model:
+                if accelerator.is_main_process:
+                    unwrap_dist_model(model).save_checkpoint(save_to, accelerator)
 
             validate(
                 model=unwrap_dist_model(model),
