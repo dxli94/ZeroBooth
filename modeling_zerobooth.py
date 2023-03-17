@@ -1,10 +1,12 @@
 import os
 import inspect
+from typing import List
 import tqdm
 
 import random
 import torch
 import torch.nn.functional as F
+import numpy as np
 from torch import nn
 from transformers import CLIPTokenizer
 from transformers.activations import QuickGELUActivation as QuickGELU
@@ -20,6 +22,8 @@ from diffusers import (
     UNet2DConditionModel,
 )
 from modeling_clip import CtxCLIPTextModel
+import ptp_utils
+from ptp_utils import AttentionStore, P2PCrossAttnProcessor
 
 
 class ProjLayer(nn.Module):
@@ -502,6 +506,227 @@ class ZeroBooth(nn.Module):
         image = numpy_to_pil(image)
 
         return image
+
+    @torch.no_grad()
+    def generate_p2p(
+        self,
+        samples,
+        guidance_scale=7.5,
+        height=512,
+        width=512,
+        controller=None,
+        seed=42,
+        num_inference_steps=250,
+        eta=1,
+        neg_prompt="",
+        disable_subject=False
+    ):
+        self.register_attention_control(controller)
+
+        input_image = samples["input_images"]  # reference image
+        text_input = samples["class_names"]  # category
+        prompt = samples["prompt"]  # prompt for stable diffusion
+
+        scheduler = self.eval_noise_scheduler
+        # timesteps = self.scheduler.timesteps
+
+        # 1. extract BLIP query features and proj to text space -> (bs, 32, 768)
+        if not disable_subject:
+            query_embeds = self.blip(image=input_image, text=text_input)
+            query_embeds = query_embeds[:, : self.num_query_token, :]
+            query_embeds = self.proj_layer(query_embeds)
+        else:
+            query_embeds = None
+
+        # 2. embeddings for prompt, with query_embeds as context
+        # tokenized_prompt = self.tokenize_text(prompt).to(self.device)
+        tokenized_prompt = self.tokenizer(
+            prompt,
+            padding="max_length",
+            truncation=True,
+            max_length=self.text_encoder.text_model.config.max_position_embeddings,
+            return_tensors="pt",
+        ).to(self.device)
+
+        text_embeddings = self.text_encoder(
+            input_ids=tokenized_prompt.input_ids,
+            ctx_embeddings=query_embeds,
+            ctx_begin_pos=samples["ctx_begin_pos"],
+        )[0]
+
+        # 3. unconditional embedding
+        do_classifier_free_guidance = guidance_scale > 1.0
+
+        if do_classifier_free_guidance:
+            max_length = self.text_encoder.text_model.config.max_position_embeddings 
+
+            uncond_input = self.tokenizer(
+                [neg_prompt],
+                padding="max_length",
+                max_length=max_length,
+                return_tensors="pt",
+            )
+
+            # FIXME use context embedding for uncond_input or not?
+            uncond_embeddings = self.text_encoder(
+                input_ids=uncond_input.input_ids.to(self.device),
+                ctx_embeddings=None,
+            )[0]
+
+            # For classifier free guidance, we need to do two forward passes.
+            # Here we concatenate the unconditional and text embeddings into a single batch
+            # to avoid doing two forward passes
+            text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
+
+        latents_shape = (1, self.unet.in_channels, height // 8, width // 8)
+
+        if seed is not None:
+            generator = torch.Generator(device=self.device)
+            generator = generator.manual_seed(seed)
+
+        latents = torch.randn(
+            latents_shape,
+            generator=generator,
+            device=self.device,
+        )
+
+        # set timesteps
+        accepts_offset = "offset" in set(
+            inspect.signature(scheduler.set_timesteps).parameters.keys()
+        )
+        extra_set_kwargs = {}
+        if accepts_offset:
+            extra_set_kwargs["offset"] = 1
+
+        scheduler.set_timesteps(num_inference_steps, **extra_set_kwargs)
+
+        # if we use LMSDiscreteScheduler, let's make sure latents are mulitplied by sigmas
+        if isinstance(scheduler, LMSDiscreteScheduler):
+            latents = latents * scheduler.sigmas[0]
+
+        # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
+        # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
+        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
+        # and should be between [0, 1]
+        accepts_eta = "eta" in set(inspect.signature(scheduler.step).parameters.keys())
+        extra_step_kwargs = {}
+        if accepts_eta:
+            extra_step_kwargs["eta"] = eta
+
+        iterator = tqdm.tqdm(scheduler.timesteps)
+
+        for i, t in enumerate(iterator):
+            # expand the latents if we are doing classifier free guidance
+            latent_model_input = (
+                torch.cat([latents] * 2) if do_classifier_free_guidance else latents
+            )
+
+            # predict the noise residual
+            noise_pred = self.unet(
+                latent_model_input, t, encoder_hidden_states=text_embeddings
+            )["sample"]
+
+            # perform guidance
+            if do_classifier_free_guidance:
+                noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                noise_pred = noise_pred_uncond + guidance_scale * (
+                    noise_pred_text - noise_pred_uncond
+                )
+
+            # compute the previous noisy sample x_t -> x_t-1
+            latents = scheduler.step(noise_pred, t, latents, **extra_step_kwargs)[
+                "prev_sample"
+            ]
+
+            if controller is not None:
+                latents = controller.step_callback(latents)
+
+            # call the callback, if provided
+            # if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+            #     progress_bar.update()
+            #     if callback is not None and i % callback_steps == 0:
+            #         callback(i, t, latents)
+
+        # scale and decode the image latents with vae
+        latents = 1 / 0.18215 * latents
+        image = self.vae.decode(latents).sample
+
+        image = (image / 2 + 0.5).clamp(0, 1)
+        image = image.cpu().permute(0, 2, 3, 1).numpy()
+
+        image = numpy_to_pil(image)
+
+        return image
+    
+    def register_attention_control(self, controller):
+        attn_procs = {}
+        cross_att_count = 0
+        for name in self.unet.attn_processors.keys():
+            cross_attention_dim = None if name.endswith("attn1.processor") else self.unet.config.cross_attention_dim
+            if name.startswith("mid_block"):
+                hidden_size = self.unet.config.block_out_channels[-1]
+                place_in_unet = "mid"
+            elif name.startswith("up_blocks"):
+                block_id = int(name[len("up_blocks.")])
+                hidden_size = list(reversed(self.unet.config.block_out_channels))[block_id]
+                place_in_unet = "up"
+            elif name.startswith("down_blocks"):
+                block_id = int(name[len("down_blocks.")])
+                hidden_size = self.unet.config.block_out_channels[block_id]
+                place_in_unet = "down"
+            else:
+                continue
+            cross_att_count += 1
+            attn_procs[name] = P2PCrossAttnProcessor(
+                controller=controller, place_in_unet=place_in_unet
+            )
+
+        self.unet.set_attn_processor(attn_procs)
+        if controller is not None:
+            controller.num_att_layers = cross_att_count
+
+    def aggregate_attention(self, prompts, attention_store: AttentionStore, res: int, from_where: List[str], is_cross: bool, select: int):
+        out = []
+        attention_maps = attention_store.get_average_attention()
+        num_pixels = res ** 2
+        for location in from_where:
+            for item in attention_maps[f"{location}_{'cross' if is_cross else 'self'}"]:
+                if item.shape[1] == num_pixels:
+                    cross_maps = item.reshape(len(prompts), -1, res, res, item.shape[-1])[select]
+                    out.append(cross_maps)
+        out = torch.cat(out, dim=0)
+        out = out.sum(0) / out.shape[0]
+        return out.cpu()
+
+    def show_cross_attention(self, prompts, attention_store: AttentionStore, res: int, from_where: List[str], select: int = 0):
+        tokens = self.tokenizer.encode(prompts[select])
+        decoder = self.tokenizer.decode
+        attention_maps = self.aggregate_attention(prompts, attention_store, res, from_where, True, select)
+        images = []
+        for i in range(len(tokens)):
+            image = attention_maps[:, :, i]
+            image = 255 * image / image.max()
+            image = image.unsqueeze(-1).expand(*image.shape, 3)
+            image = image.numpy().astype(np.uint8)
+            image = np.array(Image.fromarray(image).resize((256, 256)))
+            image = ptp_utils.text_under_image(image, decoder(int(tokens[i])))
+            images.append(image)
+        ptp_utils.view_images(np.stack(images, axis=0))
+
+    def show_self_attention_comp(self, prompts, attention_store: AttentionStore, res: int, from_where: List[str],
+                            max_com=10, select: int = 0):
+        attention_maps = self.aggregate_attention(prompts, attention_store, res, from_where, False, select).numpy().reshape((res ** 2, res ** 2))
+        u, s, vh = np.linalg.svd(attention_maps - np.mean(attention_maps, axis=1, keepdims=True))
+        images = []
+        for i in range(max_com):
+            image = vh[i].reshape(res, res)
+            image = image - image.min()
+            image = 255 * image / image.max()
+            image = np.repeat(np.expand_dims(image, axis=2), 3, axis=2).astype(np.uint8)
+            image = Image.fromarray(image).resize((256, 256))
+            image = np.array(image)
+            images.append(image)
+        ptp_utils.view_images(np.concatenate(images, axis=1))
 
     def tokenize_text(self, text_input):
         tokenized_text = self.tokenizer(
