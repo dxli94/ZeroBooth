@@ -17,6 +17,7 @@ from diffusers import (
     AutoencoderKL,
     DDIMScheduler,
     DDPMScheduler,
+    PNDMScheduler,
     LMSDiscreteScheduler,
     StableDiffusionPipeline,
     UNet2DConditionModel,
@@ -506,6 +507,17 @@ class ZeroBooth(nn.Module):
         image = numpy_to_pil(image)
 
         return image
+    
+    def _init_latent(self, latent, height, width, generator, batch_size):
+        if latent is None:
+            latent = torch.randn(
+                (1, self.unet.in_channels, height // 8, width // 8),
+                generator=generator,
+            )
+            latent = latent.expand(batch_size,  self.unet.in_channels, height // 8, width // 8).to(self.device)
+        else:
+            latent = latent.to(self.device)
+        return latent
 
     @torch.no_grad()
     def generate_p2p(
@@ -515,6 +527,7 @@ class ZeroBooth(nn.Module):
         height=512,
         width=512,
         controller=None,
+        init_latent=None,
         seed=42,
         num_inference_steps=250,
         eta=1,
@@ -526,6 +539,7 @@ class ZeroBooth(nn.Module):
         input_image = samples["input_images"]  # reference image
         text_input = samples["class_names"]  # category
         prompt = samples["prompt"]  # prompt for stable diffusion
+        batch_size = len(prompt)
 
         scheduler = self.eval_noise_scheduler
         # timesteps = self.scheduler.timesteps
@@ -540,18 +554,21 @@ class ZeroBooth(nn.Module):
 
         # 2. embeddings for prompt, with query_embeds as context
         # tokenized_prompt = self.tokenize_text(prompt).to(self.device)
-        tokenized_prompt = self.tokenizer(
-            prompt,
-            padding="max_length",
-            truncation=True,
-            max_length=self.text_encoder.text_model.config.max_position_embeddings,
-            return_tensors="pt",
-        ).to(self.device)
+        if not disable_subject:
+            tokenized_prompt = self.tokenize_text(prompt).to(self.device)
+        else:
+            tokenized_prompt = self.tokenizer(
+                prompt,
+                padding="max_length",
+                truncation=True,
+                max_length=self.text_encoder.text_model.config.max_position_embeddings,
+                return_tensors="pt",
+            ).to(self.device)
 
         text_embeddings = self.text_encoder(
             input_ids=tokenized_prompt.input_ids,
-            ctx_embeddings=query_embeds,
-            ctx_begin_pos=samples["ctx_begin_pos"],
+            ctx_embeddings=torch.cat([query_embeds] * 2, dim=0) if query_embeds is not None else None,
+            ctx_begin_pos=samples["ctx_begin_pos"] * len(prompt),
         )[0]
 
         # 3. unconditional embedding
@@ -572,23 +589,19 @@ class ZeroBooth(nn.Module):
                 input_ids=uncond_input.input_ids.to(self.device),
                 ctx_embeddings=None,
             )[0]
+            # repeat the uncond embedding to match the number of prompts
+            uncond_embeddings = uncond_embeddings.expand(len(prompt), -1, -1)
 
             # For classifier free guidance, we need to do two forward passes.
             # Here we concatenate the unconditional and text embeddings into a single batch
             # to avoid doing two forward passes
             text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
 
-        latents_shape = (1, self.unet.in_channels, height // 8, width // 8)
-
         if seed is not None:
-            generator = torch.Generator(device=self.device)
+            generator = torch.Generator(device="cpu")
             generator = generator.manual_seed(seed)
 
-        latents = torch.randn(
-            latents_shape,
-            generator=generator,
-            device=self.device,
-        )
+        latents = self._init_latent(init_latent, height, width, generator, batch_size)
 
         # set timesteps
         accepts_offset = "offset" in set(
@@ -621,7 +634,6 @@ class ZeroBooth(nn.Module):
                 torch.cat([latents] * 2) if do_classifier_free_guidance else latents
             )
 
-            # predict the noise residual
             noise_pred = self.unet(
                 latent_model_input, t, encoder_hidden_states=text_embeddings
             )["sample"]
@@ -640,12 +652,6 @@ class ZeroBooth(nn.Module):
 
             if controller is not None:
                 latents = controller.step_callback(latents)
-
-            # call the callback, if provided
-            # if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
-            #     progress_bar.update()
-            #     if callback is not None and i % callback_steps == 0:
-            #         callback(i, t, latents)
 
         # scale and decode the image latents with vae
         latents = 1 / 0.18215 * latents
@@ -698,7 +704,15 @@ class ZeroBooth(nn.Module):
         out = out.sum(0) / out.shape[0]
         return out.cpu()
 
-    def show_cross_attention(self, prompts, attention_store: AttentionStore, res: int, from_where: List[str], select: int = 0):
+    def show_cross_attention(self, prompts, attention_store: AttentionStore, res: int, from_where: List[str], select: int = 0, disable_subject=True):
+        if not disable_subject:
+            new_prompts = []
+            for i in range(len(prompts)):
+                tokens = prompts[i].split(" ")
+                tokens = [tokens[0]] + ["sks"] * self.num_query_token + tokens[1:]
+                new_prompts.append(" ".join(tokens))
+            prompts = new_prompts
+
         tokens = self.tokenizer.encode(prompts[select])
         decoder = self.tokenizer.decode
         attention_maps = self.aggregate_attention(prompts, attention_store, res, from_where, True, select)
@@ -713,20 +727,20 @@ class ZeroBooth(nn.Module):
             images.append(image)
         ptp_utils.view_images(np.stack(images, axis=0))
 
-    def show_self_attention_comp(self, prompts, attention_store: AttentionStore, res: int, from_where: List[str],
-                            max_com=10, select: int = 0):
-        attention_maps = self.aggregate_attention(prompts, attention_store, res, from_where, False, select).numpy().reshape((res ** 2, res ** 2))
-        u, s, vh = np.linalg.svd(attention_maps - np.mean(attention_maps, axis=1, keepdims=True))
-        images = []
-        for i in range(max_com):
-            image = vh[i].reshape(res, res)
-            image = image - image.min()
-            image = 255 * image / image.max()
-            image = np.repeat(np.expand_dims(image, axis=2), 3, axis=2).astype(np.uint8)
-            image = Image.fromarray(image).resize((256, 256))
-            image = np.array(image)
-            images.append(image)
-        ptp_utils.view_images(np.concatenate(images, axis=1))
+    # def show_self_attention_comp(self, prompts, attention_store: AttentionStore, res: int, from_where: List[str],
+    #                         max_com=10, select: int = 0):
+    #     attention_maps = self.aggregate_attention(prompts, attention_store, res, from_where, False, select).numpy().reshape((res ** 2, res ** 2))
+    #     u, s, vh = np.linalg.svd(attention_maps - np.mean(attention_maps, axis=1, keepdims=True))
+    #     images = []
+    #     for i in range(max_com):
+    #         image = vh[i].reshape(res, res)
+    #         image = image - image.min()
+    #         image = 255 * image / image.max()
+    #         image = np.repeat(np.expand_dims(image, axis=2), 3, axis=2).astype(np.uint8)
+    #         image = Image.fromarray(image).resize((256, 256))
+    #         image = np.array(image)
+    #         images.append(image)
+    #     ptp_utils.view_images(np.concatenate(images, axis=1))
 
     def tokenize_text(self, text_input):
         tokenized_text = self.tokenizer(
@@ -807,12 +821,21 @@ class ZeroBooth(nn.Module):
     @property
     def eval_noise_scheduler(self):
         if not hasattr(self, "_eval_noise_scheduler"):
-            self._eval_noise_scheduler = DDIMScheduler(
+            # self._eval_noise_scheduler = DDIMScheduler(
+            #     beta_start=0.00085,
+            #     beta_end=0.012,
+            #     beta_schedule="scaled_linear",
+            #     clip_sample=False,
+            #     set_alpha_to_one=False,
+            # )
+            
+            self._eval_noise_scheduler = PNDMScheduler(
                 beta_start=0.00085,
                 beta_end=0.012,
                 beta_schedule="scaled_linear",
-                clip_sample=False,
+                # clip_sample=False,
                 set_alpha_to_one=False,
+                skip_prk_steps=True,
             )
         return self._eval_noise_scheduler
 
