@@ -1,0 +1,75 @@
+# output_dir: "output/pretrain-20221230-unet-textenc-coco-v1.5"
+# output_dir: "output/pretrain-20230111-openimage-complete-only"
+# output_dir: "output/pretrain-20230208-unet-textenc-v1.5"
+# output_dir: "output/pretrain-20230211-unet-textenc-v1.5"
+# output_dir: "output/pretrain-20230212-unet-textenc-v1.5-small-region"
+# output_dir: "output/pretrain-20230216-unet-textenc-v1.5-capfilt6b7"
+# output_dir: "output/pretrain-20230216-unet-textenc-v1.5-capfilt6b7-fullmask"
+# output_dir: "output/pretrain-20230218-unet-textenc-v1.5-capfilt6b7-fullmask-rr0.75"
+# output_dir: "output/pretrain-20230218-unet-textenc-v1.5-capfilt6b7-fullmask-rr1"
+output_dir: "output/pretrain-20230222-unet-textenc-v1.5-capfilt6b7-fullmask-synbbox-rr0.33"
+# output_dir: "output/pretrain-debug"
+logging_dir: "logs"
+
+seed: 1337
+
+# transform
+image_size: 224
+tgt_image_size: 512
+
+model:
+  train_text_encoder: True
+  train_unet: True
+
+  # stable diffusion and scheduler
+  # pretrained_model_name_or_path: "CompVis/stable-diffusion-v1-4"
+  pretrained_model_name_or_path: "runwayml/stable-diffusion-v1-5"
+  # tune_num_layers_sd_text_encoder: 2
+  revision: null
+
+  # BLIP
+  text_model: 'bert-base-uncased'
+
+  # pretrained: "/export/home/workspace/dreambooth/diffusers/BLIP2/pretrain_blipv2/checkpoint_14.pth"
+  # finetuned: '/export/home/workspace/dreambooth/diffusers/BLIP2/pretrain_blipv2/checkpoint_best.pth'
+  pretrained: "/export/share/junnan-li/BLIP2/checkpoint/clip_q16.pth"
+
+  vision_model: "clip"
+  image_size: 224
+  # tgt_image_size: 512
+  # batch_size: 16
+
+  num_query_token: 16
+  max_text_length: 32
+  embed_dim: 256
+
+  # num_proj_query_token: 32
+  # num_proj_query_token: 4
+
+  use_grad_checkpointing: True
+
+# optimization
+refer_ratio: 0.0
+
+train_batch_size: 1
+gradient_accumulation_steps: 2
+
+learning_rate: 2e-6
+lr_scheduler: constant
+lr_warmup_steps: 0
+scale_lr: False
+
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_weight_decay: 1e-02
+adam_epsilon: 1e-08
+
+max_grad_norm: 20.0
+mixed_precision: "no"  # ["no", "fp16", "bf16"] 
+
+max_train_steps: 200000
+save_steps: 5000
+logging_steps: 200
+
+# distribution
+local_rank: -1

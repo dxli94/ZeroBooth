@@ -1,0 +1,77 @@
+# output_dir: "output/pretrain-20221230-unet-textenc-coco-v1.5"
+# output_dir: "output/finetune/202302250451-alvan-unet-textenc-2e-6"
+output_dir: "output/finetune/202302261122-df-bag-1e5-gpu8-1shot"
+logging_dir: "logs"
+
+seed: 1337
+
+# transform
+image_size: 224
+tgt_image_size: 512
+
+model:
+  train_text_encoder: False
+  train_unet: False
+
+  # stable diffusion and scheduler
+  # pretrained_model_name_or_path: "CompVis/stable-diffusion-v1-4"
+  pretrained_model_name_or_path: "runwayml/stable-diffusion-v1-5"
+  # tune_num_layers_sd_text_encoder: 2
+  revision: null
+
+  # BLIP
+  text_model: 'bert-base-uncased'
+
+  pretrained: "/export/share/junnan-li/BLIP2/checkpoint/clip_q16.pth"
+
+  vision_model: "clip"
+  image_size: 224
+  # tgt_image_size: 512
+  # batch_size: 16
+
+  num_query_token: 16
+  max_text_length: 32
+  embed_dim: 256
+
+  use_grad_checkpointing: True
+
+# finetune specific
+# checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-20230111-openimage/35000"
+# checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-20230222-unet-textenc-v1.5-capfilt6b7-fullmask-synbbox-rr0.33/100000"
+checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-20230222-unet-textenc-v1.5-capfilt6b7-fullmask-synbbox-rr0.33/180000"
+image_dir: "/export/home/workspace/dreambooth/diffusers/data/df-backpack/"
+subject: "backpack"
+force_init_annotations: False # if True, will always regenerate captions and bbox
+
+# optimization
+train_batch_size: 2
+gradient_accumulation_steps: 1
+
+learning_rate: 1e-5
+lr_scheduler: constant
+lr_warmup_steps: 0
+scale_lr: False
+
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_weight_decay: 1e-02
+adam_epsilon: 1e-08
+
+max_grad_norm: 20.0
+mixed_precision: "no"  # ["no", "fp16", "bf16"] 
+
+max_train_steps: 80
+save_steps: 10
+logging_steps: 10
+
+# distribution
+local_rank: -1
+
+# finetune-specific
+val_subject: "backpack"
+val_image_path: "/export/home/workspace/dreambooth/diffusers/data/df-backpack/df-bag.jpg"
+val_prompts:
+  - "at the grand canyon"
+  - "in the city of versailles"
+  - "wet in water"
+  - "with the night sky"
