@@ -240,7 +240,6 @@ class ZeroBooth(nn.Module):
         num_inference_steps=250,
         eta=1,
         neg_prompt="",
-        embedding_weights=None
     ):
 
         input_image = samples["input_images"]  # reference image
@@ -263,9 +262,6 @@ class ZeroBooth(nn.Module):
             # ctx_begin_pos=[2],
             ctx_begin_pos=samples["ctx_begin_pos"],
         )[0]
-
-        if embedding_weights is not None:
-            text_embeddings = self.apply_weights(text_embeddings, embedding_weights, samples["ctx_begin_pos"])
 
         # 3. unconditional embedding
         do_classifier_free_guidance = guidance_scale > 1.0

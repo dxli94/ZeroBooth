@@ -1,7 +1,9 @@
 # output_dir: "output/pretrain-20221230-unet-textenc-coco-v1.5"
 # output_dir: "output/finetune/202302250451-alvan-unet-textenc-2e-6"
 # output_dir: "output/finetune/202302262043-df-dog-1e5-ckpt=100k-gpu8-1shot"
-output_dir: "output/finetune/2023022680955-df-dog-1e5-ckpt=200k-rr0-gpu8-1shot"
+# output_dir: "output/finetune/2023022680955-df-dog-1e5-ckpt=200k-rr0-gpu8-1shot"
+# output_dir: "output/finetune/202303301059-df-dog-1e5-ckpt=500k-rr0-gpu8-1shot"
+output_dir: "output/finetune/202303301059-df-dog-2e6-ckpt=500k-rr0-gpu8-1shot"
 logging_dir: "logs"
 
 seed: 1337
@@ -12,6 +14,7 @@ tgt_image_size: 512
 
 model:
   train_text_encoder: False
+  # only tune several layers
   train_unet: False
 
   # stable diffusion and scheduler
@@ -39,7 +42,8 @@ model:
 # checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-20230111-openimage/35000"
 # checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-20230222-unet-textenc-v1.5-capfilt6b7-fullmask-synbbox-rr0.33/100000"
 # checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-20230222-unet-textenc-v1.5-capfilt6b7-fullmask-synbbox-rr0.33/100000"
-checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-20230225-unet-textenc-v1.5-capfilt6b7-fullmask-synbbox-rr0/200000"
+# checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-20230225-unet-textenc-v1.5-capfilt6b7-fullmask-synbbox-rr0/200000"
+checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-202302315-unet-textenc-v1.5-capfilt6b7-synbbox-matting-rr0-drop15-500k/500000"
 image_dir: "/export/home/workspace/dreambooth/diffusers/data/df-dog-alvan-nee-1shot"
 subject: "dog"
 force_init_annotations: False # if True, will always regenerate captions and bbox
@@ -48,8 +52,8 @@ force_init_annotations: False # if True, will always regenerate captions and bbo
 train_batch_size: 2
 gradient_accumulation_steps: 1
 
-# learning_rate: 2e-6
-learning_rate: 1e-5
+learning_rate: 2e-6
+# learning_rate: 1e-5
 lr_scheduler: constant
 lr_warmup_steps: 0
 scale_lr: False
@@ -66,6 +70,8 @@ max_train_steps: 50
 save_steps: 5
 logging_steps: 10
 
+save_model: False
+
 # distribution
 local_rank: -1
 
@@ -77,3 +83,6 @@ val_prompts:
   - "in the city of versailles"
   - "wet in water"
   - "with the night sky"
+  - "in van gogh painting"
+  - "eating ramen"
+  - "as a cat"
