@@ -51,7 +51,7 @@ class ProjLayer(nn.Module):
 
 
 class ZeroBooth(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, control_type="canny"):
         super().__init__()
 
         self.config = config
@@ -113,9 +113,20 @@ class ZeroBooth(nn.Module):
         # self.controlnet = ControlNetModel.from_pretrained(
         #     "fusing/stable-diffusion-v1-5-controlnet-openpose",
         # )
-        self.controlnet = ControlNetModel.from_pretrained(
-            "lllyasviel/sd-controlnet-canny"
-        )
+        if control_type == "canny":
+            self.controlnet = ControlNetModel.from_pretrained(
+                "lllyasviel/sd-controlnet-canny"
+            )
+        elif control_type == "depth":
+            self.controlnet = ControlNetModel.from_pretrained(
+                "lllyasviel/sd-controlnet-depth"
+            )
+        elif control_type == "hed":
+            self.controlnet = ControlNetModel.from_pretrained(
+                "lllyasviel/sd-controlnet-hed"
+            )
+        else:
+            raise NotImplementedError(f"control_type {control_type} not implemented")
 
         self.freeze_modules()
 
