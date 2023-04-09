@@ -51,13 +51,6 @@ def preprocess_hed(
     detected_map = apply_hed(resize_image(input_image, image_resolution))
     detected_map = HWC3(detected_map)
     img = resize_image(input_image, image_resolution)
-    H, W, C = img.shape
-
-    detected_map = cv2.resize(detected_map, (W, H), interpolation=cv2.INTER_LINEAR)
-    detected_map = nms(detected_map, 127, 3.0)
-    detected_map = cv2.GaussianBlur(detected_map, (0, 0), 3.0)
-    detected_map[detected_map > 4] = 255
-    detected_map[detected_map < 255] = 0
 
     # detected_map = cv2.resize(detected_map, (W, H), interpolation=cv2.INTER_LINEAR)
     # return PIL.Image.fromarray(control_image)
