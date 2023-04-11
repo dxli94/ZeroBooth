@@ -119,11 +119,14 @@ class ZeroBooth(nn.Module):
                 module.requires_grad_(False)
 
             modules = [
+                # self.unet.conv_in,
                 # self.unet.conv_out,
                 # self.unet.conv_act,
+                # self.unet.time_proj,
+                # self.unet.time_embedding,
                 # self.unet.conv_norm_out,
                 self.unet.down_blocks,
-                self.unet.up_blocks[:1],
+                # self.unet.up_blocks[:1],
                 self.unet.mid_block,
                 ]
             
