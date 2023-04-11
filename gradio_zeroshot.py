@@ -153,13 +153,6 @@ with gr.Blocks(
                         inputs=[model_path],
                     )
 
-            with gr.Row():
-                with gr.Column(scale=1):
-                    finetune_data = gr.Textbox(label="Finetune data directory", value=default_checkpoint)
-
-                with gr.Column(scale=0.25):
-                    finetune_btn = gr.Button(value="Finetune and Load", interactive=True, variant="primary")
-
             # other options
             with gr.Row():
                 src_subject = gr.Textbox(lines=1, label="source subject")
