@@ -259,5 +259,5 @@ if __name__ == "__main__":
     txt_tsfm = t["text_transform"]
 
     iface.queue(concurrency_count=1, api_open=False, max_size=10)
-    iface.launch(enable_queue=True)
+    iface.launch(enable_queue=True, server_port=7862)
    
