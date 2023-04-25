@@ -1,6 +1,6 @@
 # output_dir: "output/pretrain-20221230-unet-textenc-coco-v1.5"
 # output_dir: "output/finetune/202302250451-alvan-unet-textenc-2e-6"
-output_dir: "output/finetune/202302261122-df-bag-1e5-gpu8-1shot"
+output_dir: "output/finetune/202304040939-df-bag-1e5-gpu8-1shot-bsz2"
 logging_dir: "logs"
 
 seed: 1337
@@ -38,7 +38,8 @@ model:
 # finetune specific
 # checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-20230111-openimage/35000"
 # checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-20230222-unet-textenc-v1.5-capfilt6b7-fullmask-synbbox-rr0.33/100000"
-checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-20230222-unet-textenc-v1.5-capfilt6b7-fullmask-synbbox-rr0.33/180000"
+# checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-20230222-unet-textenc-v1.5-capfilt6b7-fullmask-synbbox-rr0.33/180000"
+checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-202302315-unet-textenc-v1.5-capfilt6b7-synbbox-matting-rr0-drop15-500k/500000"
 image_dir: "/export/home/workspace/dreambooth/diffusers/data/df-backpack/"
 subject: "backpack"
 force_init_annotations: False # if True, will always regenerate captions and bbox
@@ -61,7 +62,7 @@ max_grad_norm: 20.0
 mixed_precision: "no"  # ["no", "fp16", "bf16"] 
 
 max_train_steps: 80
-save_steps: 10
+save_steps: 80
 logging_steps: 10
 
 # distribution
@@ -75,3 +76,5 @@ val_prompts:
   - "in the city of versailles"
   - "wet in water"
   - "with the night sky"
+  - "by window"
+  - "in snowy forest"

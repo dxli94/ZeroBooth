@@ -3,7 +3,7 @@
 # output_dir: "output/finetune/202302262043-df-dog-1e5-ckpt=100k-gpu8-1shot"
 # output_dir: "output/finetune/2023022680955-df-dog-1e5-ckpt=200k-rr0-gpu8-1shot"
 # output_dir: "output/finetune/202303301059-df-dog-1e5-ckpt=500k-rr0-gpu8-1shot"
-output_dir: "output/finetune/202303301059-df-dog-2e6-ckpt=500k-rr0-gpu8-1shot"
+output_dir: "output/finetune/202304041007-df-dog-2e6-ckpt=500k-rr0-gpu8-1shot-bsz2"
 logging_dir: "logs"
 
 seed: 1337

@@ -3,7 +3,7 @@
 # output_dir: "output/finetune/202302271238-df-bottle-1e-5"
 # output_dir: "output/finetune/202302281028-df-bottle-1e-5-ckpt=200k-rr0-gpu8-1shot"
 # output_dir: "output/finetune/202303011221-df-bottle-1e-5-ckpt=200k-rr0-gpu8-1shot"
-output_dir: "output/finetune/202303010112-df-bottle-1e-5-ckpt=200k-rr0-gpu8-1shot"
+output_dir: "output/finetune/202304040915-df-bottle-2e-6-ckpt=500k-rr0-gpu8-1shot"
 logging_dir: "logs"
 
 seed: 1337
@@ -13,7 +13,7 @@ image_size: 224
 tgt_image_size: 512
 
 model:
-  train_text_encoder: True
+  train_text_encoder: False
   train_unet: False
 
   # stable diffusion and scheduler
@@ -44,7 +44,9 @@ model:
 # finetune specific
 # checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-20230111-openimage/35000"
 # checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-20230222-unet-textenc-v1.5-capfilt6b7-fullmask-synbbox-rr0.33/100000"
-checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-20230225-unet-textenc-v1.5-capfilt6b7-fullmask-synbbox-rr0/200000"
+# checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-20230225-unet-textenc-v1.5-capfilt6b7-fullmask-synbbox-rr0/200000"
+# checkpoint: ""
+checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-202302315-unet-textenc-v1.5-capfilt6b7-synbbox-matting-rr0-drop15-500k/500000"
 # checkpoint: "/export/home/workspace/dreambooth/diffusers/output/pretrain-20230225-unet-textenc-v1.5-capfilt6b7-fullmask-synbbox-rr0/100000"
 # image_dir: "/export/home/workspace/dreambooth/diffusers/data/df-bottle-synthetic/"
 image_dir: "/export/home/workspace/dreambooth/diffusers/data/df-bottle"
@@ -52,10 +54,10 @@ subject: "bottle"
 force_init_annotations: False # if True, will always regenerate captions and bbox
 
 # optimization
-train_batch_size: 1
+train_batch_size: 2
 gradient_accumulation_steps: 1
 
-learning_rate: 1e-5
+learning_rate: 2e-6
 lr_scheduler: constant
 lr_warmup_steps: 0
 scale_lr: False
@@ -80,6 +82,12 @@ val_image_path: "/export/home/workspace/dreambooth/diffusers/data/df-bottle/df-b
 # val_image_path: "/export/home/workspace/dreambooth/diffusers/data/df-bottle/df-bottle_syn.jpg"
 val_prompts:
   - "at the grand canyon"
+  - "buried in sands"
+  - "in the ocean"
+  - "two of them"
+  - "as lamp"
+  - "by window"
+  - "in snowy forest"
   # - "in the city of versailles"
   # - "wet in water"
   # - "with the night sky"
