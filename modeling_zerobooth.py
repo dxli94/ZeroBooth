@@ -864,7 +864,9 @@ class ZeroBooth(nn.Module):
             image = np.array(Image.fromarray(image).resize((256, 256)))
             image = ptp_utils.text_under_image(image, decoder(int(tokens[i])))
             images.append(image)
-        ptp_utils.view_images(np.stack(images, axis=0))
+
+        view_images = ptp_utils.view_images(np.stack(images, axis=0))
+        return view_images
 
     # def show_self_attention_comp(self, prompts, attention_store: AttentionStore, res: int, from_where: List[str],
     #                         max_com=10, select: int = 0):
