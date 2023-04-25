@@ -108,8 +108,19 @@ class ZeroBooth(nn.Module):
         self.vae.train = self.disabled_train
         self.vae.requires_grad_(False)
 
-        if not self.config["train_unet"]:
-            print("Freezing UNet")
+        # freeze Q in self.unet.up_blocks
+        if self.config["train_unet"] == "crossattn-kv":
+            print("Freezing Q in UNet up.block")
+            for x in self.unet.up_blocks.named_parameters():
+                if "transformer_blocks" not in x[0]:
+                    x[1].requires_grad_(False)
+                elif not ('attn2.to_k' in x[0] or 'attn2.to_v' in x[0]):
+                    x[1].requires_grad_(False)
+                else:
+                    x[1].requires_grad_(True)
+
+        elif self.config["train_unet"] == "upblocks":
+            print("Freezing UNet down and mid blocks")
             # self.unet.eval()
             # self.unet.train = self.disabled_train
             # self.unet.requires_grad_(False)
