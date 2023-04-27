@@ -22,7 +22,7 @@ from diffusers.optimization import get_scheduler
 logger = get_logger(__name__)
 
 model_config = {
-    "train_text_encoder": False,
+    "train_text_encoder": True,
     # "train_unet": False,
     "train_unet": "crossattn-kv", # crossattn-kv: only tune KV, upblocks: freeze all downblocks and middleblocks
     # STABLE DIFFUSION
@@ -181,6 +181,8 @@ def main(
     print("loading checkpoint: ", checkpoint)
     model.load_checkpoint(checkpoint)
 
+    for x in model.named_parameters():
+        print(x[0], x[1].requires_grad)
     # optimization
     optimizer_class = torch.optim.AdamW
     model_params = model.parameters()
@@ -375,10 +377,10 @@ def generate_annotations():
 if __name__ == "__main__":
     debug = False
 
-    train_batch_size = 4
-    max_train_steps = 120
-    save_step = 60
-    learning_rate = 8e-6
+    # train_batch_size = 4
+    # max_train_steps = 120
+    # save_step = 60
+    # learning_rate = 8e-6
 
     force_init_annotations = False
     # subject = "dog"
@@ -462,7 +464,7 @@ if __name__ == "__main__":
     # ===============
     #    benchmark
     # ===============
-    save_step = 60
+    # save_step = 60
 
     # subject = "cat"
     # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/cat"
@@ -482,14 +484,14 @@ if __name__ == "__main__":
     # subject = "dog"
     # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/dog2"
 
-    subject = "dog"
-    image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/dog3"
+    # subject = "dog"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/dog3"
     # learning_rate = 2e-5
     # max_train_steps = 60
-    train_batch_size = 6
-    learning_rate = 2e-6
-    max_train_steps = 600
-    save_step = 100
+    train_batch_size = 2
+    learning_rate = 3e-6
+    max_train_steps = 300
+    save_step = 50
 
     # subject = "dog"
     # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/dog8"
@@ -515,11 +517,12 @@ if __name__ == "__main__":
     # subject = "sneaker"
     # image_dir = ""
 
-    # subject = "backpack"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/backpack_dog"
+    subject = "backpack"
+    image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/backpack_dog"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/one-shot/backpack-dog"
 
-    # subject = "backpack"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/backpack"
+    # subject = "person"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/jugg"
 
     # subject = "backpack"
     # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/backpack"
