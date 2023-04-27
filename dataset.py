@@ -61,6 +61,7 @@ def load_dataset(
             clip_tokenizer=clip_tokenizer,
             subject=kwargs["subject"],
             image_dir=kwargs["image_dir"],
+            shuffle_input=kwargs["shuffle_input"],
         )
     else:
         raise ValueError(f"Unknown dataset {dataset_name}")
@@ -692,6 +693,7 @@ class ImageDirDataset(Dataset):
         image_dir,
         subject,
         annotation_filename="annotations.json",
+        shuffle_input=False,
         inp_image_transform=None,
         tgt_image_transform=None,
         # inp_bbox_transform=None,
@@ -701,6 +703,8 @@ class ImageDirDataset(Dataset):
     ):
         self.image_dir = image_dir
         self.subject = subject
+
+        self.shuffle_input = shuffle_input
 
         image_paths = os.listdir(self.image_dir)
         # image paths are jpg png webp
@@ -734,6 +738,21 @@ class ImageDirDataset(Dataset):
     def __len__(self):
         return len(self.annotations)
 
+    def get_shuffle_input_image(self):
+        # a random index
+        # while True:
+        index = random.randint(0, len(self) - 1)
+        #     if index != forbid_index:
+        #         break
+
+        image_basename = self.annotations[index]["image_path"]
+        image_path = os.path.join(self.image_dir, image_basename)
+        image = Image.open(image_path).convert("RGB")
+
+        print("Getting shuffle input image from {}".format(image_path))
+
+        return image
+
     def __getitem__(self, index):
         image_basename = self.annotations[index]["image_path"]
         image_path = os.path.join(self.image_dir, image_basename)
@@ -760,11 +779,16 @@ class ImageDirDataset(Dataset):
         # bbox = tuple(self.annotations[index]["bbox"])
         # bbox_image = crop_bbox(image, bbox, width, height)
 
+        if self.shuffle_input and len(self) > 1:
+            input_image = self.get_shuffle_input_image()
+        else:
+            input_image = image
+
         # transform
         if self.inp_image_transform is not None:
-            inp_image = self.inp_image_transform(image)
+            inp_image = self.inp_image_transform(input_image)
         else:
-            inp_image = image
+            inp_image = input_image
 
         # if self.inp_bbox_transform is not None:
         #     bbox_inp_image = self.inp_bbox_transform(bbox_image)
