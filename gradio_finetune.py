@@ -40,6 +40,7 @@ model_config = {
 }
 # model_config = SimpleNamespace(**model_config)
 
+dataset_shuffle = True
 
 def create_transforms(image_size=224, tgt_image_size=512):
     # preprocess
@@ -256,6 +257,7 @@ def main(
         clip_tokenizer=model.tokenizer,
         subject=subject,
         image_dir=image_dir,
+        shuffle_input=dataset_shuffle,
     )
     print(f"Loaded {len(train_dataset)} training examples")
 
@@ -373,9 +375,10 @@ def generate_annotations():
 if __name__ == "__main__":
     debug = False
 
-    train_batch_size = 2
-    max_train_steps = 100
-    save_step = 20
+    train_batch_size = 4
+    max_train_steps = 120
+    save_step = 60
+    learning_rate = 8e-6
 
     force_init_annotations = False
     # subject = "dog"
@@ -389,9 +392,33 @@ if __name__ == "__main__":
     # subject = "dog"
     # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/few-shot/lukasz-rawa-dog"
 
-    subject = "teapot"
-    image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/few-shot/oriento-teapot"
-    learning_rate = 4e-5
+    # subject = "teapot"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/few-shot/oriento-teapot"
+    # learning_rate = 4e-5
+
+    # subject = "cat"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/cat"
+    # learning_rate = 2e-5
+    # max_train_steps = 60
+    # save_step = 20
+
+    # subject = "cat"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/cat2"
+    # learning_rate = 2e-5
+    # max_train_steps = 60
+    # save_step = 60
+
+    # subject = "sloth"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/grey_sloth_plushie"
+    # learning_rate = 2e-5
+    # max_train_steps = 60
+    # save_step = 60
+
+    # subject = "toy"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/monster_toy"
+    # learning_rate = 4e-5
+    # max_train_steps = 60
+    # save_step = 60
 
     # subject = "clock"
     # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/few-shot/laura-chouette-clock"
@@ -432,6 +459,95 @@ if __name__ == "__main__":
     # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/few-shot/flouffy-dog"
     # learning_rate = 2e-5
 
+    # ===============
+    #    benchmark
+    # ===============
+    save_step = 60
+
+    # subject = "cat"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/cat"
+    # learning_rate = 2e-5
+    # max_train_steps = 60
+
+    # subject = "cat"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/cat2"
+    # learning_rate = 2e-5
+    # max_train_steps = 60
+
+    # subject = "dog"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/dog"
+    # learning_rate = 2e-5
+    # max_train_steps = 60
+
+    # subject = "dog"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/dog2"
+
+    subject = "dog"
+    image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/dog3"
+    # learning_rate = 2e-5
+    # max_train_steps = 60
+    train_batch_size = 6
+    learning_rate = 2e-6
+    max_train_steps = 600
+    save_step = 100
+
+    # subject = "dog"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/dog8"
+
+    # subject = "clock"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/clock"
+    # learning_rate = 2e-5
+    # max_train_steps = 60
+
+    # subject = "shoes"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/colorful_sneaker"
+    # learning_rate = 2e-5
+    # max_train_steps = 60
+
+    # subject = "toy"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/duck_toy"
+    # learning_rate = 2e-5
+    # max_train_steps = 60
+
+    # subject = "toy"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/wolf_plushie"
+
+    # subject = "sneaker"
+    # image_dir = ""
+
+    # subject = "backpack"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/backpack_dog"
+
+    # subject = "backpack"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/backpack"
+
+    # subject = "backpack"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/backpack"
+
+    # subject = "plushie"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/bear_plushie"
+
+    # subject = "sunglasses"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/pink_sunglasses"
+
+    # subject = "boot"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/fancy_boot"
+    # max_train_steps = 240
+
+    # subject = "toy"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/poop_emoji"
+    # learning_rate = 2e-5
+    # max_train_steps = 60
+
+    # subject = "robot"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/robot_toy"
+    # max_train_steps = 240
+
+    # subject = "bottle"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/vase"
+    # learning_rate = 2e-6
+    # max_train_steps = 420 
+
     # default args
     checkpoint = "/export/home/workspace/dreambooth/diffusers/output/pretrain-202302315-unet-textenc-v1.5-capfilt6b7-synbbox-matting-rr0-drop15-500k/500000"
 
@@ -447,8 +563,8 @@ if __name__ == "__main__":
     if debug:
         output_dir = "/export/home/workspace/dreambooth/diffusers/output/debug"
     else:
-        output_dir = "/export/home/workspace/dreambooth/diffusers/output/finetune/{}-{}-{}-{}".format(
-            datetime.now().strftime("%y%m%d%H%M%S"), image_dir_base, max_train_steps, learning_rate
+        output_dir = "/export/home/workspace/dreambooth/diffusers/output/official_benchmark/{}-{}-{}-{}-shuffle={}".format(
+            datetime.now().strftime("%y%m%d%H%M%S"), image_dir_base, max_train_steps, learning_rate, dataset_shuffle
         )
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
