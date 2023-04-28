@@ -724,6 +724,7 @@ class ImageDirDataset(Dataset):
         #     )
 
         self.annotations = json.load(open(os.path.join(image_dir, annotation_filename)))
+        self.actual_len = len(self.annotations)
         # a hacky way to create infinite long dataset
         self.annotations = self.annotations * 100000
 
