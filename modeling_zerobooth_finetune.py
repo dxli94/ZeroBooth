@@ -91,6 +91,8 @@ class ZeroBooth(nn.Module):
             subfolder="vae",
             revision=config["revision"],
         )
+        self.vae.half()
+
         self.unet = UNet2DConditionModel.from_pretrained(
             config["pretrained_model_name_or_path"],
             subfolder="unet",
@@ -102,6 +104,8 @@ class ZeroBooth(nn.Module):
         )
 
         self.freeze_modules()
+
+        self.ctx_embeddings_cache = None
 
     def freeze_modules(self):
         self.vae.eval()
@@ -181,6 +185,34 @@ class ZeroBooth(nn.Module):
     @property
     def device(self):
         return list(self.parameters())[0].device
+    
+    def forward_ctx_embeddings(self, batch):
+        if self.ctx_embeddings_cache is not None:
+            # expand to batch size
+            ctx_embeddings = self.ctx_embeddings_cache.expand(
+                batch["input_images"].shape[0], -1, -1
+            )
+        else:
+            blip_embeddings = self.blip(
+                image=batch["input_images"],
+                text=batch["class_names"],
+            )
+
+            # projected as clip text embeddings
+            blip_embeddings = blip_embeddings[:, : self.num_query_token, :]
+            ctx_embeddings = self.proj_layer(blip_embeddings)
+
+        return ctx_embeddings
+    
+    def init_ctx_embeddings_cache(self, batch):
+        ctx_embeddings = self.forward_ctx_embeddings(batch)
+        # take mean of all ctx embeddings
+        ctx_embeddings = ctx_embeddings.mean(dim=0, keepdim=True)
+        self.ctx_embeddings_cache = ctx_embeddings
+    
+    def move_ctx_encoder_to_cpu(self):
+        self.blip = self.blip.to("cpu")
+        self.proj_layer = self.proj_layer.to("cpu")
 
     def forward(self, batch):
         """
@@ -196,7 +228,7 @@ class ZeroBooth(nn.Module):
         # Convert images to latent space
         latents = self.vae.encode(
             # batch["pixel_values"].to(dtype=weight_dtype)
-            batch["pixel_values"]
+            batch["pixel_values"].half()
         ).latent_dist.sample()
         latents = latents * 0.18215
 
@@ -215,15 +247,15 @@ class ZeroBooth(nn.Module):
         # Add noise to the latents according to the noise magnitude at each timestep
         # (this is the forward diffusion process)
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
+        ctx_embeddings = self.forward_ctx_embeddings(batch)
+        # blip_embeddings = self.blip(
+        #     image=batch["input_images"],
+        #     text=batch["class_names"],
+        # )
 
-        blip_embeddings = self.blip(
-            image=batch["input_images"],
-            text=batch["class_names"],
-        )
-
-        # projected as clip text embeddings
-        blip_embeddings = blip_embeddings[:, : self.num_query_token, :]
-        ctx_embeddings = self.proj_layer(blip_embeddings)
+        # # projected as clip text embeddings
+        # blip_embeddings = blip_embeddings[:, : self.num_query_token, :]
+        # ctx_embeddings = self.proj_layer(blip_embeddings)
 
         # Get the text embedding for conditioning
         # TODO make it configurable rather than hardcoding 2 (2 = len(["[pad]", "a"])
@@ -234,7 +266,7 @@ class ZeroBooth(nn.Module):
         )[0]
 
         # Predict the noise residual
-        noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states).sample
+        noise_pred = self.unet(noisy_latents.float(), timesteps, encoder_hidden_states).sample
 
         loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
 
@@ -394,148 +426,6 @@ class ZeroBooth(nn.Module):
 
         return image
 
-    @torch.no_grad()
-    def generate_attn_ctrl(
-        self,
-        samples,
-        guidance_scale=7.5,
-        height=512,
-        width=512,
-        seed=42,
-        num_inference_steps=250,
-        eta=1,
-        neg_prompt="",
-        prompt_edit_token_weights=[],
-    ):
-
-        input_image = samples["input_images"]  # reference image
-        text_input = samples["class_names"]  # category
-        prompt = samples["prompt"]  # prompt for stable diffusion
-
-        scheduler = self.eval_noise_scheduler
-
-        # 1. extract BLIP query features and proj to text space -> (bs, 32, 768)
-        query_embeds = self.blip(image=input_image, text=text_input)
-        query_embeds = query_embeds[:, : self.num_query_token, :]
-        query_embeds = self.proj_layer(query_embeds)
-
-        # 2. embeddings for prompt, with query_embeds as context
-        tokenized_prompt = self.tokenize_text(prompt).to(self.device)
-
-        text_embeddings = self.text_encoder(
-            input_ids=tokenized_prompt.input_ids,
-            ctx_embeddings=query_embeds,
-            # ctx_begin_pos=[2],
-            ctx_begin_pos=samples["ctx_begin_pos"],
-        )[0]
-
-        # 3. unconditional embedding
-        do_classifier_free_guidance = guidance_scale > 1.0
-
-        if do_classifier_free_guidance:
-            max_length = self.text_encoder.text_model.config.max_position_embeddings 
-
-            uncond_input = self.tokenizer(
-                [neg_prompt],
-                padding="max_length",
-                max_length=max_length,
-                return_tensors="pt",
-            )
-
-            # FIXME use context embedding for uncond_input or not?
-            uncond_embeddings = self.text_encoder(
-                input_ids=uncond_input.input_ids.to(self.device),
-                ctx_embeddings=None,
-            )[0]
-
-            # For classifier free guidance, we need to do two forward passes.
-            # Here we concatenate the unconditional and text embeddings into a single batch
-            # to avoid doing two forward passes
-            # text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
-        
-        self.unet = init_attention_func(self.unet)
-        self.unet = init_attention_weights(self.unet, prompt_edit_token_weights)
-
-        latents_shape = (1, self.unet.in_channels, height // 8, width // 8)
-
-        if seed is not None:
-            generator = torch.Generator(device=self.device)
-            generator = generator.manual_seed(seed)
-
-        latents = torch.randn(
-            latents_shape,
-            generator=generator,
-            device=self.device,
-        )
-
-        # set timesteps
-        accepts_offset = "offset" in set(
-            inspect.signature(scheduler.set_timesteps).parameters.keys()
-        )
-        extra_set_kwargs = {}
-        if accepts_offset:
-            extra_set_kwargs["offset"] = 1
-
-        scheduler.set_timesteps(num_inference_steps, **extra_set_kwargs)
-
-        # if we use LMSDiscreteScheduler, let's make sure latents are mulitplied by sigmas
-        if isinstance(scheduler, LMSDiscreteScheduler):
-            latents = latents * scheduler.sigmas[0]
-
-        # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
-        # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
-        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
-        # and should be between [0, 1]
-        accepts_eta = "eta" in set(inspect.signature(scheduler.step).parameters.keys())
-        extra_step_kwargs = {}
-        if accepts_eta:
-            extra_step_kwargs["eta"] = eta
-
-        iterator = tqdm.tqdm(scheduler.timesteps)
-
-        for i, t in enumerate(iterator):
-            # expand the latents if we are doing classifier free guidance
-            # latent_model_input = (
-            #     torch.cat([latents] * 2) if do_classifier_free_guidance else latents
-            # )
-            latent_model_input = (
-                latents if do_classifier_free_guidance else latents
-            )
-
-            # predict the noise residual
-            noise_pred_uncond = self.unet(
-                latent_model_input, t, encoder_hidden_states=uncond_embeddings
-            )["sample"]
-
-            self.unet = use_last_tokens_attention_weights(self.unet)
-
-            noise_pred_text = self.unet(
-                latent_model_input, t, encoder_hidden_states=text_embeddings
-            )["sample"]
-
-            # perform guidance
-            if do_classifier_free_guidance:
-                # noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                noise_pred = noise_pred_uncond + guidance_scale * (
-                    noise_pred_text - noise_pred_uncond
-                )
-
-            # compute the previous noisy sample x_t -> x_t-1
-            latents = scheduler.step(noise_pred, t, latents, **extra_step_kwargs)[
-                "prev_sample"
-            ]
-
-        # scale and decode the image latents with vae
-        latents = 1 / 0.18215 * latents
-        image = self.vae.decode(latents).sample
-
-        image = (image / 2 + 0.5).clamp(0, 1)
-        image = image.cpu().permute(0, 2, 3, 1).numpy()
-
-        image = numpy_to_pil(image)
-
-        return image
-
     def tokenize_text(self, text_input):
         tokenized_text = self.tokenizer(
             text_input,
@@ -568,12 +458,15 @@ class ZeroBooth(nn.Module):
 
         blip_save_to = os.path.join(path, "blip_model")
         proj_save_to = os.path.join(path, "proj_layer")
+        ctx_save_to = os.path.join(path, "ctx_embeddings_cache")
 
         os.makedirs(blip_save_to)
         os.makedirs(proj_save_to)
+        os.makedirs(ctx_save_to)
 
         torch.save(blip_without_ddp.state_dict(), blip_save_to + "/blip_weight.pt")
         torch.save(proj_without_ddp.state_dict(), proj_save_to + "/proj_weight.pt")
+        torch.save(self.ctx_embeddings_cache, ctx_save_to + "/ctx_embeddings_cache.pt")
 
     @torch.no_grad()
     def load_checkpoint(self, checkpoint_dir):
