@@ -22,7 +22,7 @@ from diffusers.optimization import get_scheduler
 logger = get_logger(__name__)
 
 model_config = {
-    "train_text_encoder": True,
+    "train_text_encoder": False,
     # "train_unet": False,
     "train_unet": "crossattn-kv", # crossattn-kv: only tune KV, upblocks: freeze all downblocks and middleblocks
     # STABLE DIFFUSION
@@ -40,7 +40,8 @@ model_config = {
 }
 # model_config = SimpleNamespace(**model_config)
 
-dataset_shuffle = True
+dataset_shuffle = False
+use_cache_subj_emb = True
 
 def create_transforms(image_size=224, tgt_image_size=512):
     # preprocess
@@ -51,22 +52,6 @@ def create_transforms(image_size=224, tgt_image_size=512):
                 image_size, interpolation=InterpolationMode.BICUBIC
             ),
             transforms.CenterCrop(image_size),
-            transforms.ToTensor(),
-            transforms.Normalize(OPENAI_DATASET_MEAN, OPENAI_DATASET_STD),
-        ]
-    )
-
-    inp_bbox_transform = transforms.Compose(
-        [
-            transforms.RandomResizedCrop(
-                image_size,
-                scale=(0.9, 1.0),
-                interpolation=InterpolationMode.BICUBIC,
-            ),
-            # transforms.Resize(
-            #     config.tgt_image_size, interpolation=InterpolationMode.BICUBIC
-            # ),
-            transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize(OPENAI_DATASET_MEAN, OPENAI_DATASET_STD),
         ]
@@ -84,24 +69,11 @@ def create_transforms(image_size=224, tgt_image_size=512):
         ]
     )
 
-    tgt_bbox_transform = transforms.Compose(
-        [
-            transforms.Resize(
-                tgt_image_size, interpolation=InterpolationMode.BICUBIC
-            ),
-            transforms.CenterCrop(tgt_image_size),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]),
-        ]
-    )
-
     text_transform = BlipCaptionProcessor()
 
     return {
         "inp_image_transform": inp_image_transform,
         "tgt_image_transform": tgt_image_transform,
-        "inp_bbox_transform": inp_bbox_transform,
-        "tgt_bbox_transform": tgt_bbox_transform,
         "text_transform": text_transform,
     }
 
@@ -115,6 +87,25 @@ def move_batch_to_device(batch, device):
     for k, v in batch.items():
         if isinstance(v, torch.Tensor):
             batch[k] = v.to(device)
+
+
+def collect_subj_inputs(dataset, device):
+    examples = [dataset[i] for i in range(dataset.actual_len)]
+
+    input_images_key = "input_image"
+    input_images = (
+        torch.stack([example[input_images_key] for example in examples])
+        .to(memory_format=torch.contiguous_format)
+        .float()
+    )
+
+    class_names = [example["class_name"] for example in examples]
+
+    return {
+        "input_images": input_images.to(device),
+        "class_names": class_names,
+    }
+
 
 def main(
     subject,
@@ -321,6 +312,16 @@ def main(
     # for epoch in range(args.num_train_epochs):
     model.train()
 
+    if use_cache_subj_emb:
+        subj_inputs = collect_subj_inputs(
+            train_dataset,
+            device=accelerator.device
+        )
+        model.init_ctx_embeddings_cache(subj_inputs)
+        # to save memory
+        model.move_ctx_encoder_to_cpu()
+        torch.cuda.empty_cache()
+
     # for step, batch in enumerate(train_dataloader):
     while True:
         batch = next(train_dataloader)
@@ -488,10 +489,11 @@ if __name__ == "__main__":
     # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/dog3"
     # learning_rate = 2e-5
     # max_train_steps = 60
-    train_batch_size = 2
-    learning_rate = 3e-6
-    max_train_steps = 300
-    save_step = 50
+    train_batch_size = 4
+    learning_rate = 5e-6
+    # max_train_steps = 300
+    max_train_steps = 100
+    save_step = 10
 
     # subject = "dog"
     # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/dog8"
@@ -566,8 +568,8 @@ if __name__ == "__main__":
     if debug:
         output_dir = "/export/home/workspace/dreambooth/diffusers/output/debug"
     else:
-        output_dir = "/export/home/workspace/dreambooth/diffusers/output/official_benchmark/{}-{}-{}-{}-shuffle={}".format(
-            datetime.now().strftime("%y%m%d%H%M%S"), image_dir_base, max_train_steps, learning_rate, dataset_shuffle
+        output_dir = "/export/home/workspace/dreambooth/diffusers/output/official_benchmark/{}-{}-{}-{}-shuffle={}-cache={}".format(
+            datetime.now().strftime("%y%m%d%H%M%S"), image_dir_base, max_train_steps, learning_rate, dataset_shuffle, use_cache_subj_emb
         )
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
