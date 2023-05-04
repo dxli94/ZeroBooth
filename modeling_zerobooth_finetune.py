@@ -120,57 +120,6 @@ class ZeroBooth(nn.Module):
         self.blip.train = self.disabled_train
         self.blip.requires_grad_(False)
 
-        # for x in self.unet.named_parameters():
-        #     if "transformer_blocks" not in x[0]:
-        #         x[1].requires_grad_(False)
-        #     elif not ('attn2.to_k' in x[0] or 'attn2.to_v' in x[0]):
-        #         x[1].requires_grad_(False)
-        #     else:
-        #         x[1].requires_grad_(True)
-
-        # freeze Q in self.unet.up_blocks
-        # if self.config["train_unet"] == "crossattn-kv":
-            # print("Freezing Q in UNet up.block")
-            # print("Freezing Q in UNet")
-            # for x in self.unet.up_blocks.named_parameters():
-            # for x in self.unet.up_blocks.named_parameters():
-            #     if "transformer_blocks" not in x[0]:
-            #         x[1].requires_grad_(False)
-            #     elif not ('attn2.to_k' in x[0] or 'attn2.to_v' in x[0]):
-            #         x[1].requires_grad_(False)
-            #     else:
-            #         x[1].requires_grad_(True)
-
-            # print whether each param is frozen
-            # for x in self.unet.named_parameters():
-                # print(x[0], x[1].requires_grad)
-        #     pass
-
-        # elif self.config["train_unet"] == "upblocks":
-        #     print("Freezing UNet down and mid blocks")
-        #     # self.unet.eval()
-        #     # self.unet.train = self.disabled_train
-        #     # self.unet.requires_grad_(False)
-        #     def freeze_module(module):
-        #         module.eval()
-        #         module.train = self.disabled_train
-        #         module.requires_grad_(False)
-
-        #     modules = [
-        #         # self.unet.conv_in,
-        #         # self.unet.conv_out,
-        #         # self.unet.conv_act,
-        #         # self.unet.time_proj,
-        #         # self.unet.time_embedding,
-        #         # self.unet.conv_norm_out,
-        #         self.unet.down_blocks,
-        #         # self.unet.up_blocks[:1],
-        #         self.unet.mid_block,
-        #         ]
-            
-        #     for module in modules:
-        #         freeze_module(module)
-
         if not self.config["train_text_encoder"]:
             print("Freezing text encoder")
             self.text_encoder.eval()
@@ -208,7 +157,8 @@ class ZeroBooth(nn.Module):
         ctx_embeddings = self.forward_ctx_embeddings(batch)
         # take mean of all ctx embeddings
         ctx_embeddings = ctx_embeddings.mean(dim=0, keepdim=True)
-        self.ctx_embeddings_cache = ctx_embeddings
+        # nn.Parameter to make it trainable
+        self.ctx_embeddings_cache = nn.Parameter(ctx_embeddings, requires_grad=True)
     
     def move_ctx_encoder_to_cpu(self):
         self.blip = self.blip.to("cpu")
@@ -455,6 +405,7 @@ class ZeroBooth(nn.Module):
         # save blip model and proj weights
         blip_without_ddp = accelerator.unwrap_model(self.blip)
         proj_without_ddp = accelerator.unwrap_model(self.proj_layer)
+        ctx_without_ddp = accelerator.unwrap_model(self.ctx_embeddings_cache)
 
         blip_save_to = os.path.join(path, "blip_model")
         proj_save_to = os.path.join(path, "proj_layer")
@@ -466,7 +417,7 @@ class ZeroBooth(nn.Module):
 
         torch.save(blip_without_ddp.state_dict(), blip_save_to + "/blip_weight.pt")
         torch.save(proj_without_ddp.state_dict(), proj_save_to + "/proj_weight.pt")
-        torch.save(self.ctx_embeddings_cache, ctx_save_to + "/ctx_embeddings_cache.pt")
+        torch.save(ctx_without_ddp, ctx_save_to + "/ctx_embeddings_cache.pt")
 
     @torch.no_grad()
     def load_checkpoint(self, checkpoint_dir):
