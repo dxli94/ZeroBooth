@@ -21,8 +21,11 @@ from diffusers.optimization import get_scheduler
 
 logger = get_logger(__name__)
 
+use_cache_subj_emb = True
+train_text_encoder = False
+
 model_config = {
-    "train_text_encoder": False,
+    "train_text_encoder": train_text_encoder,
     # "train_unet": False,
     "train_unet": "crossattn-kv", # crossattn-kv: only tune KV, upblocks: freeze all downblocks and middleblocks
     # STABLE DIFFUSION
@@ -39,9 +42,6 @@ model_config = {
     "use_grad_checkpointing": True
 }
 # model_config = SimpleNamespace(**model_config)
-
-dataset_shuffle = False
-use_cache_subj_emb = True
 
 def create_transforms(image_size=224, tgt_image_size=512):
     # preprocess
@@ -122,6 +122,7 @@ def main(
     seed=1337,
     save_model=True,
     save_steps=50,
+    min_save_steps=50,
     adam_beta1=0.9,
     adam_beta2=0.999,
     adam_weight_decay=0.01,
@@ -171,20 +172,6 @@ def main(
     # load checkpoint
     print("loading checkpoint: ", checkpoint)
     model.load_checkpoint(checkpoint)
-
-    for x in model.named_parameters():
-        print(x[0], x[1].requires_grad)
-    # optimization
-    optimizer_class = torch.optim.AdamW
-    model_params = model.parameters()
-
-    optimizer = optimizer_class(
-        model_params,
-        lr=float(learning_rate),
-        betas=(float(adam_beta1), float(adam_beta2)),
-        weight_decay=float(adam_weight_decay),
-        eps=float(adam_epsilon),
-    )
 
     # ====== Dataset ======
     def collate_fn(examples):
@@ -250,9 +237,36 @@ def main(
         clip_tokenizer=model.tokenizer,
         subject=subject,
         image_dir=image_dir,
-        shuffle_input=dataset_shuffle,
+        shuffle_input=False,
     )
     print(f"Loaded {len(train_dataset)} training examples")
+
+    if use_cache_subj_emb:
+        model = model.cuda()
+
+        subj_inputs = collect_subj_inputs(
+            train_dataset,
+            device=accelerator.device
+        )
+        model.init_ctx_embeddings_cache(subj_inputs)
+        # to save memory
+        model.move_ctx_encoder_to_cpu()
+        torch.cuda.empty_cache()
+
+    for x in model.named_parameters():
+        print(x[0], x[1].requires_grad)
+
+    # optimization
+    optimizer_class = torch.optim.AdamW
+    model_params = model.parameters()
+
+    optimizer = optimizer_class(
+        model_params,
+        lr=float(learning_rate),
+        betas=(float(adam_beta1), float(adam_beta2)),
+        weight_decay=float(adam_weight_decay),
+        eps=float(adam_epsilon),
+    )
 
     sampler = DistributedSampler(
         train_dataset,
@@ -312,16 +326,6 @@ def main(
     # for epoch in range(args.num_train_epochs):
     model.train()
 
-    if use_cache_subj_emb:
-        subj_inputs = collect_subj_inputs(
-            train_dataset,
-            device=accelerator.device
-        )
-        model.init_ctx_embeddings_cache(subj_inputs)
-        # to save memory
-        model.move_ctx_encoder_to_cpu()
-        torch.cuda.empty_cache()
-
     # for step, batch in enumerate(train_dataloader):
     while True:
         batch = next(train_dataloader)
@@ -349,13 +353,13 @@ def main(
 
         # Create the pipeline using using the trained modules and save it.
         if global_step % save_steps == 0 or global_step == max_train_steps:
-            print(f"Saving model at step {global_step}.")
-            save_to = os.path.join(output_dir, f"{global_step}")
+            if global_step > min_save_steps:
+                if save_model:
+                    print(f"Saving model at step {global_step}.")
+                    save_to = os.path.join(output_dir, f"{global_step}")
 
-            # if hasattr(args, "save_model") and args.save_model:
-            if save_model:
-                if accelerator.is_main_process:
-                    unwrap_dist_model(model).save_checkpoint(save_to, accelerator)
+                    if accelerator.is_main_process:
+                        unwrap_dist_model(model).save_checkpoint(save_to, accelerator)
 
         if global_step >= max_train_steps:
             break
@@ -378,10 +382,12 @@ def generate_annotations():
 if __name__ == "__main__":
     debug = False
 
-    # train_batch_size = 4
-    # max_train_steps = 120
-    # save_step = 60
-    # learning_rate = 8e-6
+    train_batch_size = 3
+    learning_rate = 5e-6
+    # max_train_steps = 300
+    max_train_steps = 120
+    min_save_steps = 10
+    save_step = 10
 
     force_init_annotations = False
     # subject = "dog"
@@ -489,11 +495,6 @@ if __name__ == "__main__":
     # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/dog3"
     # learning_rate = 2e-5
     # max_train_steps = 60
-    train_batch_size = 4
-    learning_rate = 5e-6
-    # max_train_steps = 300
-    max_train_steps = 100
-    save_step = 10
 
     # subject = "dog"
     # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/dog8"
@@ -522,6 +523,9 @@ if __name__ == "__main__":
     subject = "backpack"
     image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/backpack_dog"
     # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/one-shot/backpack-dog"
+
+    # subject = "statue"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/merlion"
 
     # subject = "person"
     # image_dir = "/export/home/workspace/dreambooth/diffusers/data/jugg"
@@ -568,8 +572,8 @@ if __name__ == "__main__":
     if debug:
         output_dir = "/export/home/workspace/dreambooth/diffusers/output/debug"
     else:
-        output_dir = "/export/home/workspace/dreambooth/diffusers/output/official_benchmark/{}-{}-{}-{}-shuffle={}-cache={}".format(
-            datetime.now().strftime("%y%m%d%H%M%S"), image_dir_base, max_train_steps, learning_rate, dataset_shuffle, use_cache_subj_emb
+        output_dir = "/export/home/workspace/dreambooth/diffusers/output/official_benchmark/{}-{}-{}-{}-cache={}-textenc={}".format(
+            datetime.now().strftime("%y%m%d%H%M%S"), image_dir_base, max_train_steps, learning_rate, use_cache_subj_emb, train_text_encoder,
         )
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -585,6 +589,7 @@ if __name__ == "__main__":
         train_batch_size,
         max_train_steps,
         save_steps=save_step,
+        min_save_steps=min_save_steps,
     )
 
     print("Done. Checkpoint saved to: {}".format(output_dir))
