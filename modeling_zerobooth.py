@@ -110,7 +110,8 @@ class ZeroBooth(nn.Module):
 
         self.freeze_modules()
 
-        self.ctx_embeddings_cache = None
+        self.ctx_embeddings_cache = nn.Parameter(torch.zeros(1, 16, 768), requires_grad=False)
+        self.use_cache = False
 
     def freeze_modules(self):
         self.vae.eval()
@@ -232,7 +233,7 @@ class ZeroBooth(nn.Module):
         return cur_text_embeddings
 
     def forward_ctx_embeddings(self, input_image, text_input):
-        if self.ctx_embeddings_cache is not None:
+        if self.use_cache:
             print("Using cached BLIP embeddings")
             # expand to batch size
             ctx_embeddings = self.ctx_embeddings_cache.expand(
@@ -838,16 +839,16 @@ class ZeroBooth(nn.Module):
         )
 
         try:
-            self.ctx_embeddings_cache = torch.load(
+            self.ctx_embeddings_cache.data = torch.load(
                 os.path.join(checkpoint_dir, "ctx_embeddings_cache/ctx_embeddings_cache.pt"),
-                map_location="cpu",
+                map_location=self.device,
             )
-            # move to model device
-            self.ctx_embeddings_cache = self.ctx_embeddings_cache.to(self.device)
+            self.use_cache = True
+            # self.ctx_embeddings_cache = nn.Parameter(ctx_embeddings_cache, requires_grad=False)
             print("Loaded ctx_embeddings_cache from {}".format(checkpoint_dir))
         except FileNotFoundError:
+            self.use_cache = False
             print("No ctx_embeddings_cache found in {}".format(checkpoint_dir))
-            pass
 
     @property
     def eval_noise_scheduler(self):
