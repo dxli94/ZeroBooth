@@ -385,8 +385,8 @@ if __name__ == "__main__":
     train_batch_size = 3
     learning_rate = 5e-6
     # max_train_steps = 300
-    max_train_steps = 120
-    min_save_steps = 10
+    max_train_steps = 130
+    min_save_steps = 70
     save_step = 10
 
     force_init_annotations = False
@@ -498,6 +498,12 @@ if __name__ == "__main__":
 
     # subject = "dog"
     # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/dog8"
+    # # subject-specific tuning parameters
+    # train_batch_size = 3
+    # learning_rate = 5e-6
+    # max_train_steps = 70
+    # min_save_steps = 10
+    # save_step = 30
 
     # subject = "clock"
     # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/clock"
@@ -520,8 +526,8 @@ if __name__ == "__main__":
     # subject = "sneaker"
     # image_dir = ""
 
-    subject = "backpack"
-    image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/backpack_dog"
+    # subject = "backpack"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/backpack_dog"
     # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/one-shot/backpack-dog"
 
     # subject = "statue"
@@ -556,6 +562,27 @@ if __name__ == "__main__":
     # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/vase"
     # learning_rate = 2e-6
     # max_train_steps = 420 
+
+    # subject = "teapot"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/teapot"
+
+    # subject = "backpack"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/one-shot/df-backpack"
+    # max_train_steps = 60
+    # min_save_steps = 0
+    # save_step = 10
+
+    # subject = "person"
+    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/einstein-characters/einstein"
+    # max_train_steps = 150
+    # min_save_steps = 80
+    # save_step = 10
+
+    subject = "person"
+    image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/one-shot/boxman"
+    max_train_steps = 60
+    min_save_steps = 20
+    save_step = 10
 
     # default args
     checkpoint = "/export/home/workspace/dreambooth/diffusers/output/pretrain-202302315-unet-textenc-v1.5-capfilt6b7-synbbox-matting-rr0-drop15-500k/500000"
