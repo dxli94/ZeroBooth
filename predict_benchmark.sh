@@ -1,0 +1,1 @@
+ python -m torch.distributed.run --nproc_per_node=6 predict_benchmark.py
