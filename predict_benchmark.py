@@ -10,6 +10,7 @@ import numpy as np
 import random
 from PIL import Image
 import clip
+from torchvision import transforms as pth_transforms
 
 debug = False
 seed = 1234
@@ -87,6 +88,14 @@ object_prompts = [
     'wet',
     'cube shaped'
 ]
+
+reorder_prompts = {
+    "coloured red": "red",
+    "coloured purple": "purple",
+    "shiny": "shiny",
+    "wet": "wet",
+    "cube shaped": "cube shaped",
+}
 
 
 def init_distributed_mode(args):
@@ -183,6 +192,41 @@ def get_clip_image_features_dir(dirpath, clip_model, preprocess):
     return torch.cat(features, dim=0)
 
 
+def get_dino_image_features_dir(dirpath, dino_model, preprocess):
+    filenames = sorted(os.listdir(dirpath))
+    # keep only images
+    filenames = [f for f in filenames if f.endswith(".png") or f.endswith(".jpg") or f.endswith(".jpeg")]
+    filenames = [os.path.join(dirpath, f) for f in filenames]
+
+    features = []
+
+    for filename in filenames:
+        image = Image.open(filename)
+        image_input = preprocess(image).unsqueeze(0).to(device)
+        with torch.no_grad():
+            image_features = dino_model(image_input).float()
+            image_features /= image_features.norm(dim=-1, keepdim=True)
+        
+        features.append(image_features)
+    
+    return torch.cat(features, dim=0)
+
+
+def load_dino():
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dino_model = torch.hub.load('facebookresearch/dino:main', 'dino_vits16')
+    preprocess = pth_transforms.Compose([
+        pth_transforms.Resize(256, interpolation=3),
+        pth_transforms.CenterCrop(224),
+        pth_transforms.ToTensor(),
+        pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+    ])
+
+    dino_model = dino_model.to(device)
+
+    return dino_model, preprocess
+
+
 def get_clip_text_features(text, clip_model):
     text = clip.tokenize([text]).to(device)
 
@@ -237,8 +281,23 @@ def compute_clip_score(clip_model, preprocess, image, ref_features):
     
     sims = image_features @ ref_features.T
 
-    return sims.mean().item()
+    # return sims.mean().item()
+    # to list
+    sims = sims.squeeze().tolist()
 
+    return sims
+
+def compute_dino_score(dino_model, preprocess, image, ref_features):
+    image_input = preprocess(image).unsqueeze(0).to(device)
+    with torch.no_grad():
+        image_features = dino_model(image_input).float()
+        image_features /= image_features.norm(dim=-1, keepdim=True)
+    
+    sims = image_features @ ref_features.T
+    # to list
+    sims = sims.squeeze().tolist()
+
+    return sims
 
 def get_scores_by_class_tokens(total_records):
     # records = [{"model_id": "sth", "clip_i_score": 0.3, "clip_t_score": 0.3}]
@@ -249,20 +308,24 @@ def get_scores_by_class_tokens(total_records):
         class_token = record["model_id"]
         clip_i_score = record["clip_i_score"]
         clip_t_score = record["clip_t_score"]
+        dino_score = record["dino_score"]
 
         if class_token not in scores_by_class_tokens:
             scores_by_class_tokens[class_token] = {
                 "clip_i_scores": [],
                 "clip_t_scores": [],
+                "dino_scores": []
             }
         
-        scores_by_class_tokens[class_token]["clip_i_scores"].append(clip_i_score)
+        scores_by_class_tokens[class_token]["clip_i_scores"].extend(clip_i_score)
         scores_by_class_tokens[class_token]["clip_t_scores"].append(clip_t_score)
+        scores_by_class_tokens[class_token]["dino_scores"].extend(dino_score)
 
     # take mean
     for class_token in scores_by_class_tokens:
         scores_by_class_tokens[class_token]["clip_i_scores"] = sum(scores_by_class_tokens[class_token]["clip_i_scores"]) / len(scores_by_class_tokens[class_token]["clip_i_scores"])
         scores_by_class_tokens[class_token]["clip_t_scores"] = sum(scores_by_class_tokens[class_token]["clip_t_scores"]) / len(scores_by_class_tokens[class_token]["clip_t_scores"])
+        scores_by_class_tokens[class_token]["dino_scores"] = sum(scores_by_class_tokens[class_token]["dino_scores"]) / len(scores_by_class_tokens[class_token]["dino_scores"])
     
     return scores_by_class_tokens
 
@@ -306,10 +369,11 @@ start_id = item_per_rank * rank
 end_id = min(item_per_rank*(rank+1), num_models)
 
 model = create_model()
-df_rank = df[start_id:end_id+1]
+df_rank = df[start_id:end_id]
 print("Rank {} will process {} to {}.".format(rank, start_id, end_id))
 
 clip_model, clip_preprocess = load_clip()
+dino_model, dino_preprocess = load_dino()
 
 # iterate over each model
 for index, row in df_rank.iterrows():
@@ -321,6 +385,7 @@ for index, row in df_rank.iterrows():
 
     image_indir = os.path.join(image_in_base, model_id)
     ref_image_features = get_clip_image_features_dir(image_indir, clip_model, clip_preprocess)
+    ref_image_features_dino = get_dino_image_features_dir(image_indir, dino_model, dino_preprocess)
 
     if is_live_object:
         prompts = live_prompts
@@ -330,7 +395,12 @@ for index, row in df_rank.iterrows():
     prompts = prompts if not debug else prompts[:2]
 
     for prompt in prompts:
-        prompt_with_class = f"a {class_token} {prompt}"
+        if prompt in reorder_prompts:
+            prompt = reorder_prompts[prompt]
+            prompt = f"a {prompt} {class_token}"
+        else:
+            prompt_with_class = f"a {class_token} {prompt}"
+
         ref_text_features = get_clip_text_features(prompt_with_class, clip_model)
 
         for i in range(num_images):
@@ -343,7 +413,8 @@ for index, row in df_rank.iterrows():
 
             clip_i_scores = compute_clip_score(clip_model, clip_preprocess, image, ref_image_features)
             clip_t_scores = compute_clip_score(clip_model, clip_preprocess, image, ref_text_features)
-            print(clip_i_scores, clip_t_scores)
+            dino_scores = compute_dino_score(dino_model, dino_preprocess, image, ref_image_features_dino)
+            print(clip_i_scores, clip_t_scores, dino_scores)
 
             record = {
                 "image_name": image_name,
@@ -352,6 +423,7 @@ for index, row in df_rank.iterrows():
                 "seed": this_seed,
                 "clip_i_score": clip_i_scores,
                 "clip_t_score": clip_t_scores,
+                "dino_score": dino_scores
             }
             records.append(record)
 
@@ -374,19 +446,24 @@ if rank == 0:
         json.dump(all_records, f)
 
     # compute average scores
-    total_clip_i_score = 0
-    total_clip_t_score = 0
+    total_clip_i_score = []
+    total_clip_t_score = []
+    total_dino_score = []
 
     for record in all_records:
-        total_clip_i_score += record["clip_i_score"]
-        total_clip_t_score += record["clip_t_score"]
+        total_clip_i_score.extend(record["clip_i_score"])
+        total_clip_t_score.append(record["clip_t_score"])
 
-    avg_clip_i_score = total_clip_i_score / len(all_records)
-    avg_clip_t_score = total_clip_t_score / len(all_records)
+        total_dino_score.extend(record["dino_score"])
+
+    avg_clip_i_score = sum(total_clip_i_score) / len(total_clip_i_score)
+    avg_clip_t_score = sum(total_clip_t_score) / len(total_clip_t_score)
+    avg_dino_score = sum(total_dino_score) / len(total_dino_score)
 
     metrics = {
         "avg_clip_i_score": avg_clip_i_score,
         "avg_clip_t_score": avg_clip_t_score,
+        "avg_dino_score": avg_dino_score,
     }
 
     scores_by_class_tokens = get_scores_by_class_tokens(all_records)
@@ -394,4 +471,8 @@ if rank == 0:
 
     with open(os.path.join(image_out_base, now, "metrics.json"), "w") as f:
         json.dump(metrics, f, indent=4, sort_keys=True)
+    
+    for key, value in metrics.items():
+        if not key == "scores_by_class_tokens":
+            print(key, value)
 
