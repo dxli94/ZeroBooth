@@ -237,7 +237,7 @@ class ZeroBooth(nn.Module):
             print("Using cached BLIP embeddings")
             # expand to batch size
             ctx_embeddings = self.ctx_embeddings_cache.expand(
-                input_image.shape[0], -1, -1
+                len(text_input), -1, -1
             )
         else:
             print("Computing BLIP embeddings")
