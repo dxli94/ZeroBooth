@@ -6,7 +6,7 @@ import torch.backends.cudnn as cudnn
 import numpy as np
 from annotator.util import HWC3, resize_image
 from types import SimpleNamespace
-from modeling_zerobooth import ZeroBooth
+from modeling_zerobooth_p2p import ZeroBooth
 from train_zerobooth import create_transforms
 from torchvision.transforms.functional import InterpolationMode
 from torchvision import transforms
@@ -137,7 +137,8 @@ def generate_images(
         # output_images.append(output[0])
         output_images.extend(output)
 
-        attn_map = model.show_cross_attention(prompts, controller, res=16, disable_subject=True, from_where=("up", "down"), select=0) # run only after inference once. the controller must be update to get the cross-attn map.
+        # attn_map = model.show_cross_attention(prompts, controller, res=16, disable_subject=True, from_where=("up", "down"), select=0) # run only after inference once. the controller must be update to get the cross-attn map.
+        attn_map = model.show_cross_attention(prompts, controller, res=16, disable_subject=True, from_where=("up", "down"), select=1) # run only after inference once. the controller must be update to get the cross-attn map.
         attn_maps.append(attn_map)
 
     return output_images, attn_maps
@@ -231,7 +232,7 @@ with gr.Blocks(
                 attn_gallery = gr.Gallery(label='Attention Maps',
                                           show_label=False,
                                           elem_id='gallery',
-                                         ).style(grid=1, height=600)
+                                         )#.style(grid=1)#, height=600)
 
                 seed = gr.Textbox(lines=1, label="seed", value=42)
                 num_out = gr.Slider(maximum=16, minimum=2, value=2, step=2, label="num_output")

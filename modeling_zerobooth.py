@@ -110,8 +110,7 @@ class ZeroBooth(nn.Module):
 
         self.freeze_modules()
 
-        self.ctx_embeddings_cache = nn.Parameter(torch.zeros(1, 16, 768), requires_grad=False)
-        self.use_cache = False
+        self.ctx_embeddings_cache = None
 
     def freeze_modules(self):
         self.vae.eval()
@@ -138,6 +137,24 @@ class ZeroBooth(nn.Module):
     @property
     def device(self):
         return list(self.parameters())[0].device
+
+    def init_ctx_embeddings_cache(self, batch=None):
+        if batch is not None:
+            ctx_embeddings = self.forward_ctx_embeddings(
+                batch["input_images"],
+                batch["class_names"],
+            )
+            # take mean of al ctx embeddings
+            ctx_embeddings = ctx_embeddings.mean(dim=0, keepdim=True)
+            # nn.Parameter to make it trainable
+            self.ctx_embeddings_cache = nn.Parameter(ctx_embeddings, requires_grad=False)
+        else:
+            self.ctx_embeddings_cache = nn.Parameter(torch.zeros(1, 16, 768, device=self.device), requires_grad=False)
+    
+    def move_ctx_encoder_to_cpu(self):
+        self.blip = self.blip.to("cpu")
+        self.proj_layer = self.proj_layer.to("cpu")
+
 
     def forward(self, batch):
         """
@@ -233,7 +250,7 @@ class ZeroBooth(nn.Module):
         return cur_text_embeddings
 
     def forward_ctx_embeddings(self, input_image, text_input):
-        if self.use_cache:
+        if self.ctx_embeddings_cache is not None:
             print("Using cached BLIP embeddings")
             # expand to batch size
             ctx_embeddings = self.ctx_embeddings_cache.expand(
@@ -259,7 +276,11 @@ class ZeroBooth(nn.Module):
         num_inference_steps=250,
         eta=1,
         neg_prompt="",
+        controller=None,
     ):
+        if controller is not None:
+            self.register_attention_control(controller)
+
         input_image = samples["input_images"]  # reference image
         text_input = samples["class_names"]  # category
         prompt = samples["prompt"]  # prompt for stable diffusion

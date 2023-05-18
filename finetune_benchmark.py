@@ -1,6 +1,6 @@
+from collections import defaultdict
 import os
 from pathlib import Path
-from types import SimpleNamespace
 
 import torch
 import torch.utils.checkpoint
@@ -367,6 +367,10 @@ def main(
     accelerator.wait_for_everyone()
     accelerator.end_training()
 
+    model.cpu()
+    del model
+    torch.cuda.empty_cache()
+
 
 def generate_annotations():
     annotation_path = os.path.join(image_dir, "annotations.json")
@@ -378,6 +382,7 @@ def generate_annotations():
             image_dir=image_dir,
             annotation_path=annotation_path,
         )
+    torch.cuda.empty_cache()
 
 if __name__ == "__main__":
     debug = False
@@ -385,269 +390,89 @@ if __name__ == "__main__":
     train_batch_size = 3
     learning_rate = 5e-6
     # max_train_steps = 300
-    max_train_steps = 130
-    min_save_steps = 70
+    # max_train_steps = 130
+    min_save_steps = 30
     save_step = 10
 
     force_init_annotations = False
-    # subject = "dog"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/alvan-nee-1shot"
 
-    # subject = "cat"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/yepu-cat"
-    # subject = "dog"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/few-shot/alvan-nee-dog"
+    data_root = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset"
+    instances = [
+        # {"subject": "backpack", "image_dir": "backpack"},
+        # {"subject": "backpack", "image_dir": "backpack_dog"},
+        # {"subject": "plushie",  "image_dir": "bear_plushie"},
+        # {"subject": "bowl", "image_dir": "berry_bowl"},
+        # {"subject": "can", "image_dir": "can"},
+        # {"subject": "candle", "image_dir": "candle"},
+        # {"subject": "cat", "image_dir": "cat"},
+        # {"subject": "cat", "image_dir": "cat2"},
+        # {"subject": "clock", "image_dir": "clock"},
+        # {"subject": "sneaker", "image_dir": "colorful_sneaker"},
+        # {"subject": "dog", "image_dir": "dog"},
+        # {"subject": "dog", "image_dir": "dog2"},
+        # {"subject": "dog", "image_dir": "dog3"},
+        # {"subject": "dog", "image_dir": "dog5"},
+        # {"subject": "dog", "image_dir": "dog6"},
+        # {"subject": "dog", "image_dir": "dog7"},
+        # {"subject": "dog", "image_dir": "dog8"},
+        # {"subject": "toy", "image_dir": "duck_toy"},
+        # {"subject": "boot", "image_dir": "fancy_boot"},
+        # {"subject": "plushie", "image_dir": "grey_sloth_plushie"},
+        # {"subject": "toy", "image_dir": "monster_toy"},
+        # {"subject": "sunglasses", "image_dir": "pink_sunglasses"},
+        {"subject": "toy", "image_dir": "poop_emoji"},
+        # {"subject": "car", "image_dir": "rc_car"},
+        # {"subject": "cartoon", "image_dir": "red_cartoon"},
+        # {"subject": "robot", "image_dir": "robot_toy"},
+        # {"subject": "sneaker", "image_dir": "shiny_sneaker"},
+        # {"subject": "teapot", "image_dir": "teapot"},
+        # {"subject": "bottle", "image_dir": "vase"},
+        # {"subject": "plushie", "image_dir": "wolf_plushie"},
+    ]
 
-    # subject = "dog"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/few-shot/lukasz-rawa-dog"
+    subj2steps = {"cat": 70, "dog": 70, "bowl": 50}
+    subj2steps = defaultdict(lambda: 120, subj2steps)
 
-    # subject = "teapot"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/few-shot/oriento-teapot"
-    # learning_rate = 4e-5
-
-    # subject = "cat"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/cat"
-    # learning_rate = 2e-5
-    # max_train_steps = 60
-    # save_step = 20
-
-    # subject = "cat"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/cat2"
-    # learning_rate = 2e-5
-    # max_train_steps = 60
-    # save_step = 60
-
-    # subject = "sloth"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/grey_sloth_plushie"
-    # learning_rate = 2e-5
-    # max_train_steps = 60
-    # save_step = 60
-
-    # subject = "toy"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/monster_toy"
-    # learning_rate = 4e-5
-    # max_train_steps = 60
-    # save_step = 60
-
-    # subject = "clock"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/few-shot/laura-chouette-clock"
-
-    # subject = "vase"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/few-shot/oriento-vase"
-
-    # subject = "dog"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/few-shot/lukasz-rawa-dog"
-    # learning_rate = 2e-5
-
-    # subject = "sunglasses"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/few-shot/laura-chouette-glasses"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/few-shot/laura-chouette-glasses-crop"
-    # learning_rate = 2e-5
-
-    # subject = "toy"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/few-shot/ti-toy-cat"
-    # learning_rate = 2e-5
-
-    # subject = "cat"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/few-shot/alvan-nee-cat"
-    # learning_rate = 2e-5
-
-    # subject = "bird"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/few-shot/lukasz-rawa-yellow-bird"
-    # learning_rate = 2e-5
-
-    # subject = "kettle"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/one-shot/good-bear-kettle"
-    # learning_rate = 2e-5
-
-    # subject = "dog"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/alvan-nee-1shot"
-    # learning_rate = 2e-5
-
-    # subject = "dog"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/few-shot/flouffy-dog"
-    # learning_rate = 2e-5
-
-    # ===============
-    #    benchmark
-    # ===============
-    # save_step = 60
-
-    # subject = "cat"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/cat"
-    # learning_rate = 2e-5
-    # max_train_steps = 60
-
-    # subject = "cat"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/cat2"
-    # learning_rate = 2e-5
-    # max_train_steps = 60
-
-    # subject = "dog"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/dog"
-    # learning_rate = 2e-5
-    # max_train_steps = 60
-
-    # subject = "dog"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/dog2"
-
-    # subject = "dog"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/dog3"
-    # learning_rate = 2e-5
-    # max_train_steps = 60
-
-    # subject = "dog"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/dog8"
-    # # subject-specific tuning parameters
-    # train_batch_size = 3
-    # learning_rate = 5e-6
-    # max_train_steps = 70
-    # min_save_steps = 10
-    # save_step = 30
-
-    # subject = "clock"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/clock"
-    # learning_rate = 2e-5
-    # max_train_steps = 60
-
-    # subject = "shoes"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/colorful_sneaker"
-    # learning_rate = 2e-5
-    # max_train_steps = 60
-
-    # subject = "toy"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/duck_toy"
-    # learning_rate = 2e-5
-    # max_train_steps = 60
-
-    # subject = "toy"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/wolf_plushie"
-
-    # subject = "sneaker"
-    # image_dir = ""
-
-    # subject = "backpack"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/backpack_dog"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/one-shot/backpack-dog"
-
-    # subject = "statue"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/merlion"
-
-    # subject = "person"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/jugg"
-
-    # subject = "backpack"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/backpack"
-
-    # subject = "plushie"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/bear_plushie"
-
-    # subject = "sunglasses"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/pink_sunglasses"
-
-    # subject = "boot"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/fancy_boot"
-    # max_train_steps = 240
-
-    # subject = "toy"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/poop_emoji"
-    # learning_rate = 2e-5
-    # max_train_steps = 60
-
-    subject = "robot"
-    image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/robot_toy"
-    max_train_steps = 180
-    min_save_steps = 110
-    save_steps = 10
-
-    # subject = "bottle"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/vase"
-    # learning_rate = 2e-6
-    # max_train_steps = 420 
-
-    # subject = "teapot"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset/teapot"
-
-    # subject = "backpack"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/one-shot/df-backpack"
-    # max_train_steps = 60
-    # min_save_steps = 0
-    # save_step = 10
-
-    # subject = "person"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/einstein-characters/einstein"
-    # max_train_steps = 150
-    # min_save_steps = 80
-    # save_step = 10
-
-    # subject = "person"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/benchmark/one-shot/boxman"
-    # max_train_steps = 60
-    # min_save_steps = 20
-    # save_step = 10
-    # learning_rate = 2e-6
-
-    # subject = "person"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/einstein-characters/elmo"
-    # max_train_steps = 80
-    # min_save_steps = 20
-    # save_step = 20
-    # learning_rate = 4e-6
-
-    # subject = "vase"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/einstein-characters/vase"
-    # max_train_steps = 100
-    # min_save_steps = 20
-    # save_step = 20
-    # learning_rate = 4e-6
-
-    # subject = "bird"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/einstein-characters/bird"
-    # max_train_steps = 100
-    # min_save_steps = 20
-    # save_step = 20
-    # learning_rate = 4e-6
-
-    # subject = "cake"
-    # image_dir = "/export/home/workspace/dreambooth/diffusers/data/einstein-characters/cake"
-    # max_train_steps = 60
-    # min_save_steps = 10
-    # save_step = 10
-    # learning_rate = 4e-6
+    subj2min_steps = {"cat": 10, "dog": 10, "bowl": 0}
+    subj2min_steps = defaultdict(lambda: 40, subj2min_steps)
 
     # default args
     checkpoint = "/export/home/workspace/dreambooth/diffusers/output/pretrain-202302315-unet-textenc-v1.5-capfilt6b7-synbbox-matting-rr0-drop15-500k/500000"
 
-    # for learning_rate in [4e-5, 6e-5]:
-    generate_annotations()
-
-    # get now
     import datetime
     from datetime import datetime
 
-    image_dir_base = os.path.basename(image_dir)
+    for instance in instances:
+        subject = instance["subject"]
+        image_dir = os.path.join(data_root, instance["image_dir"])
 
-    if debug:
-        output_dir = "/export/home/workspace/dreambooth/diffusers/output/debug"
-    else:
-        output_dir = "/export/home/workspace/dreambooth/diffusers/output/finetune/{}-{}-{}-{}-cache={}-textenc={}".format(
+        max_train_steps = subj2steps[subject]
+        min_save_steps = subj2min_steps[subject]
+
+        generate_annotations()
+
+        # get now
+        image_dir_base = os.path.basename(image_dir)
+
+        output_dir = "/export/home/workspace/dreambooth/diffusers/output/benchmark/{}-{}-{}-{}-cache={}-textenc={}".format(
             datetime.now().strftime("%y%m%d%H%M%S"), image_dir_base, max_train_steps, learning_rate, use_cache_subj_emb, train_text_encoder,
         )
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    logging_dir = os.path.join(output_dir, "logs")
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        logging_dir = os.path.join(output_dir, "logs")
 
-    main(
-        subject,
-        image_dir,
-        output_dir,
-        logging_dir,
-        checkpoint,
-        learning_rate,
-        train_batch_size,
-        max_train_steps,
-        save_steps=save_step,
-        min_save_steps=min_save_steps,
-    )
+        main(
+            subject,
+            image_dir,
+            output_dir,
+            logging_dir,
+            checkpoint,
+            learning_rate,
+            train_batch_size,
+            max_train_steps,
+            save_steps=save_step,
+            min_save_steps=min_save_steps,
+        )
 
-    print("Done. Checkpoint saved to: {}".format(output_dir))
+        torch.cuda.empty_cache()
+        print("Done. Checkpoint saved to: {}".format(output_dir))

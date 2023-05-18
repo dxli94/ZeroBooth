@@ -1,0 +1,157 @@
+{
+    "avg_clip_i_score": 0.8053536526466472,
+    "avg_clip_t_score": 0.3020085358296831,
+    "avg_dino_score": 0.6695282950072279,
+    "avg_scores_by_class_tokens": {
+        "backpack": {
+            "clip_i_scores": 0.8390013347466786,
+            "clip_t_scores": 0.31956783817708495,
+            "dino_scores": 0.5511399651740988
+        },
+        "backpack_dog": {
+            "clip_i_scores": 0.7602434364795684,
+            "clip_t_scores": 0.31726520039141176,
+            "dino_scores": 0.6391315336346627
+        },
+        "bear_plushie": {
+            "clip_i_scores": 0.7515557660579681,
+            "clip_t_scores": 0.30747884461283687,
+            "dino_scores": 0.6930052322328091
+        },
+        "berry_bowl": {
+            "clip_i_scores": 0.8286064264973003,
+            "clip_t_scores": 0.2543092693835497,
+            "dino_scores": 0.8080730875631172
+        },
+        "can": {
+            "clip_i_scores": 0.694937753384312,
+            "clip_t_scores": 0.3125975265055895,
+            "dino_scores": 0.6176425049801667
+        },
+        "candle": {
+            "clip_i_scores": 0.7516674960136414,
+            "clip_t_scores": 0.3114085136502981,
+            "dino_scores": 0.5186175724059344
+        },
+        "cat": {
+            "clip_i_scores": 0.8688553817749023,
+            "clip_t_scores": 0.30645810379087923,
+            "dino_scores": 0.8064511904001236
+        },
+        "cat2": {
+            "clip_i_scores": 0.864044716143608,
+            "clip_t_scores": 0.2839763137996197,
+            "dino_scores": 0.746555254369974
+        },
+        "clock": {
+            "clip_i_scores": 0.7841577679663896,
+            "clip_t_scores": 0.30536677719652655,
+            "dino_scores": 0.4794015213840951
+        },
+        "colorful_sneaker": {
+            "clip_i_scores": 0.8052843824625014,
+            "clip_t_scores": 0.31986671103537084,
+            "dino_scores": 0.7387508535027505
+        },
+        "dog": {
+            "clip_i_scores": 0.860013345193863,
+            "clip_t_scores": 0.3125168793648482,
+            "dino_scores": 0.8212640723854303
+        },
+        "dog2": {
+            "clip_i_scores": 0.8414611643354097,
+            "clip_t_scores": 0.30655694803595535,
+            "dino_scores": 0.7932128856405616
+        },
+        "dog3": {
+            "clip_i_scores": 0.7511403313775856,
+            "clip_t_scores": 0.3115306117236614,
+            "dino_scores": 0.5727267120241497
+        },
+        "dog5": {
+            "clip_i_scores": 0.8014391763210295,
+            "clip_t_scores": 0.3107765483856201,
+            "dino_scores": 0.72705444663167
+        },
+        "dog6": {
+            "clip_i_scores": 0.8906697290539742,
+            "clip_t_scores": 0.28012705451250075,
+            "dino_scores": 0.834147957354784
+        },
+        "dog7": {
+            "clip_i_scores": 0.8225466584801675,
+            "clip_t_scores": 0.309818039804697,
+            "dino_scores": 0.6717766624808311
+        },
+        "dog8": {
+            "clip_i_scores": 0.8225056878328323,
+            "clip_t_scores": 0.3103825360685587,
+            "dino_scores": 0.723263778820634
+        },
+        "duck_toy": {
+            "clip_i_scores": 0.8382458545714616,
+            "clip_t_scores": 0.2841109018027782,
+            "dino_scores": 0.6985287795215847
+        },
+        "fancy_boot": {
+            "clip_i_scores": 0.8274311580856641,
+            "clip_t_scores": 0.29860058428347114,
+            "dino_scores": 0.6491708581050237
+        },
+        "grey_sloth_plushie": {
+            "clip_i_scores": 0.7797986569523812,
+            "clip_t_scores": 0.3216961761564016,
+            "dino_scores": 0.7168492484211921
+        },
+        "monster_toy": {
+            "clip_i_scores": 0.7425409922361375,
+            "clip_t_scores": 0.2924760818779469,
+            "dino_scores": 0.5660137355893851
+        },
+        "pink_sunglasses": {
+            "clip_i_scores": 0.8263620938162008,
+            "clip_t_scores": 0.31216739059984683,
+            "dino_scores": 0.6252889534682036
+        },
+        "poop_emoji": {
+            "clip_i_scores": 0.7837777971565723,
+            "clip_t_scores": 0.29045989429950714,
+            "dino_scores": 0.6271286365061999
+        },
+        "rc_car": {
+            "clip_i_scores": 0.7748006422281264,
+            "clip_t_scores": 0.2878829661309719,
+            "dino_scores": 0.6509992430686949
+        },
+        "red_cartoon": {
+            "clip_i_scores": 0.8815089879781007,
+            "clip_t_scores": 0.26211192114651205,
+            "dino_scores": 0.7878823606446385
+        },
+        "robot_toy": {
+            "clip_i_scores": 0.8031444724202157,
+            "clip_t_scores": 0.3162410409748554,
+            "dino_scores": 0.6255859054267406
+        },
+        "shiny_sneaker": {
+            "clip_i_scores": 0.804365494137009,
+            "clip_t_scores": 0.2971507946699858,
+            "dino_scores": 0.7566181937642396
+        },
+        "teapot": {
+            "clip_i_scores": 0.818825668990612,
+            "clip_t_scores": 0.330783078700304,
+            "dino_scores": 0.48432829466611144
+        },
+        "vase": {
+            "clip_i_scores": 0.8124678222934406,
+            "clip_t_scores": 0.2611433438956738,
+            "dino_scores": 0.628179475054145
+        },
+        "wolf_plushie": {
+            "clip_i_scores": 0.7597399278283119,
+            "clip_t_scores": 0.32542818391323086,
+            "dino_scores": 0.5992966036081315
+        }
+    }
+}

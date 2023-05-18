@@ -3,13 +3,13 @@ import yaml
 import torch
 import random
 import torch.backends.cudnn as cudnn
-import numpy as np
 from types import SimpleNamespace
 from modeling_zerobooth import ZeroBooth
 from train_zerobooth import create_transforms
 from torchvision.transforms.functional import InterpolationMode
 from torchvision import transforms
 from lavis.processors.blip_processors import BlipCaptionProcessor
+from ptp_utils import AttentionStore
 
 OPENAI_DATASET_MEAN = (0.48145466, 0.4578275, 0.40821073)
 OPENAI_DATASET_STD = (0.26862954, 0.26130258, 0.27577711)
@@ -76,7 +76,12 @@ def generate_images(
 
     output_images = []
 
+    attn_maps = []
+
     for i in range(num_out):
+        controller = AttentionStore()
+        controller.reset()
+
         iter_seed = seed + random.randint(0, 1000000)
         print(f"Generating image {i+1}/{num_out} with seed {iter_seed}...")
         output = model.generate(
@@ -87,11 +92,17 @@ def generate_images(
             neg_prompt=negative_prompt,
             height=512,
             width=512,
+            controller=controller,
         )
+
+        tokens = prompt[0].split(" ")
+        tokens = [tokens[0]] + ["subj"] * 16 + tokens[1:]
+        attention_maps = model.show_cross_attention(prompt, controller, res=16, from_where=("up", "down"), select=0, disable_subject=False) # run only after inference once. the controller must be update to get the cross-attn map.
+        attn_maps.append(attention_maps)
 
         output_images.append(output[0])
 
-    return output_images
+    return output_images, attn_maps
 
 
 def load_checkpoint(checkpoint_path):
@@ -172,7 +183,7 @@ with gr.Blocks(
                 minimum=0.0,
                 maximum=1.0,
                 value=1.0,
-                step=0.1,
+                step=0.05,
                 interactive=True,
                 label="prompt strength (increase for more prompt influence)",
             )
@@ -184,6 +195,12 @@ with gr.Blocks(
                                     show_label=False,
                                     elem_id='gallery',
                                     ).style(grid=4, height=600)
+
+                gallery_attn = gr.Gallery(
+                    label='Output',
+                    show_label=False,
+                    elem_id='gallery',
+                )
 
                 seed = gr.Textbox(lines=1, label="seed", value=42)
                 num_out = gr.Slider(maximum=16, minimum=1, value=2, step=2, label="num_output")
@@ -207,49 +224,8 @@ with gr.Blocks(
                         guidance_scale,
                         num_out,
                     ],
-                    outputs=[gallery],
+                    outputs=[gallery, gallery_attn],
                 )
-
-                # gallery2 = gr.Gallery(label='Output',
-                #                     show_label=False,
-                #                     elem_id='gallery',
-                #                     ).style(grid=4, height=600)
-                # run_btn2 = gr.Button(
-                #     value="Run", interactive=True, variant="primary"
-                # )
-                # run_btn2.click(
-                #     generate_images,
-                #     inputs=[
-                #         image_input,
-                #         ,
-                #         prompt,
-                #         negative_prompt,
-                #         prompt_strength,
-                #         seed,
-                #         num_inference_steps,
-                #         guidance_scale,
-                #         num_out,
-                #     ],
-                #     outputs=[gallery2],
-                # )
-
-
-                # caption_output = gr.Textbox(lines=1, label="Caption Output")
-                # caption_button = gr.Button(
-                #     value="Caption it!", interactive=True, variant="primary"
-                # )
-                # caption_button.click(
-                #     inference_caption,
-                #     [
-                #         image_input,
-                #         sampling,
-                #         temperature,
-                #         len_penalty,
-                #         rep_penalty,
-                #     ],
-                #     [caption_output],
-                # )
-
 
 
 if __name__ == "__main__":
