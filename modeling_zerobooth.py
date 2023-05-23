@@ -249,7 +249,15 @@ class ZeroBooth(nn.Module):
 
         return cur_text_embeddings
 
-    def forward_ctx_embeddings(self, input_image, text_input):
+    def forward_ctx_embeddings(self, input_image, text_input, ratio=None):
+        def compute_ctx_embeddings(input_image, text_input):
+            blip_embeddings = self.blip(image=input_image, text=text_input)
+            # projected as clip text embeddings
+            blip_embeddings = blip_embeddings[:, : self.num_query_token, :]
+            ctx_embeddings = self.proj_layer(blip_embeddings)
+
+            return ctx_embeddings
+
         if self.ctx_embeddings_cache is not None:
             print("Using cached BLIP embeddings")
             # expand to batch size
@@ -257,11 +265,26 @@ class ZeroBooth(nn.Module):
                 len(text_input), -1, -1
             )
         else:
-            print("Computing BLIP embeddings")
-            blip_embeddings = self.blip(image=input_image, text=text_input)
-            # projected as clip text embeddings
-            blip_embeddings = blip_embeddings[:, : self.num_query_token, :]
-            ctx_embeddings = self.proj_layer(blip_embeddings)
+            print("Computing BLIP embeddings for {} subjects".format(len(text_input)))
+            if isinstance(text_input[0], str):
+                text_input, input_image = [text_input], [input_image]
+            
+            all_ctx_embeddings = []
+
+            for inp_image, inp_text in zip(input_image, text_input):
+                ctx_embeddings = compute_ctx_embeddings(inp_image, inp_text)
+                all_ctx_embeddings.append(ctx_embeddings)
+            
+            if ratio is not None:
+                assert len(ratio) == len(all_ctx_embeddings)
+                assert sum(ratio) == 1
+            else:
+                ratio = [1 / len(all_ctx_embeddings)] * len(all_ctx_embeddings)
+
+            ctx_embeddings = torch.zeros_like(all_ctx_embeddings[0])
+            
+            for ratio, ctx_embeddings_ in zip(ratio, all_ctx_embeddings):
+                ctx_embeddings += ratio * ctx_embeddings_
 
         return ctx_embeddings
 
