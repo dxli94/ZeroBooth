@@ -120,7 +120,8 @@ def generate_images(
             local_blend=lb
         )
 
-        iter_seed = seed + random.randint(0, 1000000)
+        # iter_seed = seed + random.randint(0, 1000000)
+        iter_seed = seed + i 
         print(f"Generating image {i+1}/{num_out} with seed {iter_seed}...")
         output = model.generate_p2p_refine(
             samples,

@@ -13,20 +13,14 @@ import clip
 from torchvision import transforms as pth_transforms
 
 debug = False
-seed = 1234
+# seed = 1234
 
 def get_timestamp():
     import datetime
     return datetime.datetime.now().strftime("%Y%m%d%H%M")
 
-now = get_timestamp()
-
 cudnn.benchmark = False
 cudnn.deterministic = True
-
-np.random.seed(seed)
-random.seed(seed)
-torch.manual_seed(seed)
 
 default_checkpoint = "/export/home/workspace/dreambooth/diffusers/output/pretrain-202302315-unet-textenc-v1.5-capfilt6b7-synbbox-matting-rr0-drop15-500k/500000"
 
@@ -329,150 +323,164 @@ def get_scores_by_class_tokens(total_records):
     
     return scores_by_class_tokens
 
+def run_with_seed(seed):
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
 
-import argparse
-parser = argparse.ArgumentParser()
-parser.add_argument('--device', default='cuda')
-parser.add_argument('--world_size', default=1, type=int, help='number of distributed processes')    
-parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
-parser.add_argument('--distributed', default=True, type=bool)
-args = parser.parse_args()
-    
-init_distributed_mode(args)
+    records = []
 
-device = torch.device(args.device)
-world_size = get_world_size()
-rank = get_rank()
+    # iterate over each model
+    for index, row in df_rank.iterrows():
+        model_id, best_ckpt, class_token, is_live_object = row
+        load_checkpoint(best_ckpt)
 
-num_images = 4
+        image_outdir = os.path.join(image_out_base, now, model_id)
+        os.makedirs(image_outdir, exist_ok=True)
 
-checkpoint_base = "/export/home/workspace/dreambooth/diffusers/output/benchmark/checkpoints"
+        image_indir = os.path.join(image_in_base, model_id)
+        ref_image_features = get_clip_image_features_dir(image_indir, clip_model, clip_preprocess)
+        ref_image_features_dino = get_dino_image_features_dir(image_indir, dino_model, dino_preprocess)
 
-image_in_base = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset"
-image_out_base = "/export/home/workspace/dreambooth/diffusers/output/benchmark/images"
-if debug:
-    image_out_base = "/export/home/workspace/dreambooth/diffusers/output/debug/images"
-
-# csv file looks like this:
-# model_id, path_to_best_checkpoint, class_token, is_live_object (bool)
-best_ckpt_file = "/export/home/workspace/dreambooth/diffusers/evaluations/best-checkpoints.csv"
-df = pd.read_csv(best_ckpt_file, header=None)
-df = df if not debug else df[:4]
-
-num_models = len(df)
-print(f"Found {num_models} models.")
-
-records = []
-
-item_per_rank = num_models // world_size
-start_id = item_per_rank * rank
-end_id = min(item_per_rank*(rank+1), num_models)
-
-model = create_model()
-df_rank = df[start_id:end_id]
-print("Rank {} will process {} to {}.".format(rank, start_id, end_id))
-
-clip_model, clip_preprocess = load_clip()
-dino_model, dino_preprocess = load_dino()
-
-# iterate over each model
-for index, row in df_rank.iterrows():
-    model_id, best_ckpt, class_token, is_live_object = row
-    load_checkpoint(best_ckpt)
-
-    image_outdir = os.path.join(image_out_base, now, model_id)
-    os.makedirs(image_outdir, exist_ok=True)
-
-    image_indir = os.path.join(image_in_base, model_id)
-    ref_image_features = get_clip_image_features_dir(image_indir, clip_model, clip_preprocess)
-    ref_image_features_dino = get_dino_image_features_dir(image_indir, dino_model, dino_preprocess)
-
-    if is_live_object:
-        prompts = live_prompts
-    else:
-        prompts = object_prompts
-    
-    prompts = prompts if not debug else prompts[:2]
-
-    for prompt in prompts:
-        if prompt in reorder_prompts:
-            prompt = reorder_prompts[prompt]
-            prompt = f"a {prompt} {class_token}"
+        if is_live_object:
+            prompts = live_prompts
         else:
-            prompt_with_class = f"a {class_token} {prompt}"
+            prompts = object_prompts
+        
+        prompts = prompts if not debug else prompts[:2]
 
-        ref_text_features = get_clip_text_features(prompt_with_class, clip_model)
+        for prompt in prompts:
+            if prompt in reorder_prompts:
+                prompt_for_clip = reorder_prompts[prompt]
+                prompt_for_clip = f"a {prompt} {class_token}"
+            else:
+                prompt_for_clip = f"a {class_token} {prompt}"
 
-        for i in range(num_images):
-            this_seed = seed + i
-            image = generate_images(class_token, prompt, this_seed)
+            ref_text_features = get_clip_text_features(prompt_for_clip, clip_model)
 
-            image_name = f"""{"-".join(prompt.split()) + str(i)}.jpg"""[:128]
-            image_path = os.path.join(image_outdir, image_name)
-            image.save(image_path)
+            for i in range(num_images):
+                this_seed = seed + i
+                image = generate_images(class_token, prompt, this_seed)
 
-            clip_i_scores = compute_clip_score(clip_model, clip_preprocess, image, ref_image_features)
-            clip_t_scores = compute_clip_score(clip_model, clip_preprocess, image, ref_text_features)
-            dino_scores = compute_dino_score(dino_model, dino_preprocess, image, ref_image_features_dino)
-            print(clip_i_scores, clip_t_scores, dino_scores)
+                image_name = f"""{"-".join(prompt.split()) + str(i)}.jpg"""[:128]
+                image_path = os.path.join(image_outdir, image_name)
+                image.save(image_path)
 
-            record = {
-                "image_name": image_name,
-                "prompt": prompt,
-                "model_id": model_id,
-                "seed": this_seed,
-                "clip_i_score": clip_i_scores,
-                "clip_t_score": clip_t_scores,
-                "dino_score": dino_scores
-            }
-            records.append(record)
+                clip_i_scores = compute_clip_score(clip_model, clip_preprocess, image, ref_image_features)
+                clip_t_scores = compute_clip_score(clip_model, clip_preprocess, image, ref_text_features)
+                dino_scores = compute_dino_score(dino_model, dino_preprocess, image, ref_image_features_dino)
+                print(clip_i_scores, clip_t_scores, dino_scores)
 
-import json
+                record = {
+                    "image_name": image_name,
+                    "prompt": prompt,
+                    "model_id": model_id,
+                    "seed": this_seed,
+                    "clip_i_score": clip_i_scores,
+                    "clip_t_score": clip_t_scores,
+                    "dino_score": dino_scores
+                }
+                records.append(record)
 
-with open(os.path.join(image_out_base, now, "records_%d.json"%rank), "w") as f:
-    json.dump(records, f)
+    import json
 
-dist.barrier()
+    with open(os.path.join(image_out_base, now, "records_%d.json"%rank), "w") as f:
+        json.dump(records, f)
 
-# merge json files
-if rank == 0:
-    all_records = []
-    for i in range(world_size):
-        with open(os.path.join(image_out_base, now, "records_%d.json"%i), "r") as f:
-            records = json.load(f)
-            all_records += records
+    dist.barrier()
 
-    with open(os.path.join(image_out_base, now, "records.json"), "w") as f:
-        json.dump(all_records, f)
+    # merge json files
+    if rank == 0:
+        all_records = []
+        for i in range(world_size):
+            with open(os.path.join(image_out_base, now, "records_%d.json"%i), "r") as f:
+                records = json.load(f)
+                all_records += records
 
-    # compute average scores
-    total_clip_i_score = []
-    total_clip_t_score = []
-    total_dino_score = []
+        with open(os.path.join(image_out_base, now, "records.json"), "w") as f:
+            json.dump(all_records, f)
 
-    for record in all_records:
-        total_clip_i_score.extend(record["clip_i_score"])
-        total_clip_t_score.append(record["clip_t_score"])
+        # compute average scores
+        total_clip_i_score = []
+        total_clip_t_score = []
+        total_dino_score = []
 
-        total_dino_score.extend(record["dino_score"])
+        for record in all_records:
+            total_clip_i_score.extend(record["clip_i_score"])
+            total_clip_t_score.append(record["clip_t_score"])
 
-    avg_clip_i_score = sum(total_clip_i_score) / len(total_clip_i_score)
-    avg_clip_t_score = sum(total_clip_t_score) / len(total_clip_t_score)
-    avg_dino_score = sum(total_dino_score) / len(total_dino_score)
+            total_dino_score.extend(record["dino_score"])
 
-    metrics = {
-        "avg_clip_i_score": avg_clip_i_score,
-        "avg_clip_t_score": avg_clip_t_score,
-        "avg_dino_score": avg_dino_score,
-    }
+        avg_clip_i_score = sum(total_clip_i_score) / len(total_clip_i_score)
+        avg_clip_t_score = sum(total_clip_t_score) / len(total_clip_t_score)
+        avg_dino_score = sum(total_dino_score) / len(total_dino_score)
 
-    scores_by_class_tokens = get_scores_by_class_tokens(all_records)
-    metrics["scores_by_class_tokens"] = scores_by_class_tokens
+        metrics = {
+            "avg_clip_i_score": avg_clip_i_score,
+            "avg_clip_t_score": avg_clip_t_score,
+            "avg_dino_score": avg_dino_score,
+        }
 
-    with open(os.path.join(image_out_base, now, "metrics.json"), "w") as f:
-        json.dump(metrics, f, indent=4, sort_keys=True)
-    
-    for key, value in metrics.items():
-        if not key == "scores_by_class_tokens":
-            print(key, value)
+        scores_by_class_tokens = get_scores_by_class_tokens(all_records)
+        metrics["scores_by_class_tokens"] = scores_by_class_tokens
 
+        with open(os.path.join(image_out_base, now, "metrics.json"), "w") as f:
+            json.dump(metrics, f, indent=4, sort_keys=True)
+        
+        for key, value in metrics.items():
+            if not key == "scores_by_class_tokens":
+                print(key, value)
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--device', default='cuda')
+    parser.add_argument('--world_size', default=1, type=int, help='number of distributed processes')    
+    parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
+    parser.add_argument('--distributed', default=True, type=bool)
+    args = parser.parse_args()
+        
+    init_distributed_mode(args)
+
+    device = torch.device(args.device)
+    world_size = get_world_size()
+    rank = get_rank()
+
+    num_images = 4
+
+    checkpoint_base = "/export/home/workspace/dreambooth/diffusers/output/benchmark/checkpoints"
+
+    image_in_base = "/export/home/workspace/dreambooth/diffusers/official_benchmark/dreambooth/dataset"
+    image_out_base = "/export/home/workspace/dreambooth/diffusers/output/benchmark/images"
+    if debug:
+        image_out_base = "/export/home/workspace/dreambooth/diffusers/output/debug/images"
+
+    # csv file looks like this:
+    # model_id, path_to_best_checkpoint, class_token, is_live_object (bool)
+    best_ckpt_file = "/export/home/workspace/dreambooth/diffusers/evaluations/best-checkpoints.csv"
+    df = pd.read_csv(best_ckpt_file, header=None)
+    df = df if not debug else df[:4]
+
+    num_models = len(df)
+    print(f"Found {num_models} models.")
+
+    import math
+    item_per_rank = math.ceil(num_models / world_size)
+    print(f"Each rank will process {item_per_rank} models.")
+    start_id = item_per_rank * rank
+    end_id = min(item_per_rank*(rank+1), num_models)
+
+    model = create_model()
+    df_rank = df[start_id:end_id]
+    print("Rank {} will process {} to {}, total {}.".format(rank, start_id, end_id - 1, len(df_rank)))
+
+    clip_model, clip_preprocess = load_clip()
+    dino_model, dino_preprocess = load_dino()
+
+    seeds = [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000]
+
+    for seed in seeds:
+        now = get_timestamp()
+
+        run_with_seed(seed)
