@@ -35,4 +35,4 @@ WORKDIR /BLIP-Diffusion-Demo/deployment
 
 ENV PYTHONPATH="${PYTHONPATH}:./:/BLIP-Diffusion-Demo:/BLIP-Diffusion-Demo/deployment"
 
-RUN chmod +x /BLIP-Diffusion-Demo/deployment/entrypoint.sh
+# RUN chmod +x /BLIP-Diffusion-Demo/deployment/entrypoint.sh
