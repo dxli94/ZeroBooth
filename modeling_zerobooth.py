@@ -111,7 +111,7 @@ class ZeroBooth(nn.Module):
         self.freeze_modules()
 
         self.ctx_embeddings_cache = None
-        self.enable_ctx_embed_cache = False
+        self.use_cache = False
 
     def freeze_modules(self):
         self.vae.eval()
@@ -149,10 +149,10 @@ class ZeroBooth(nn.Module):
             ctx_embeddings = ctx_embeddings.mean(dim=0, keepdim=True)
             # nn.Parameter to make it trainable
             self.ctx_embeddings_cache = nn.Parameter(ctx_embeddings, requires_grad=False)
-            self.enable_ctx_embed_cache = True
+            self.use_cache = True
         else:
             self.ctx_embeddings_cache = nn.Parameter(torch.zeros(1, 16, 768, device=self.device), requires_grad=False)
-            self.enable_ctx_embed_cache = False
+            self.use_cache = False
     
     def move_ctx_encoder_to_cpu(self):
         self.blip = self.blip.to("cpu")
@@ -261,7 +261,7 @@ class ZeroBooth(nn.Module):
 
             return ctx_embeddings
 
-        if self.ctx_embeddings_cache is not None and self.enable_ctx_embed_cache:
+        if self.ctx_embeddings_cache is not None and self.use_cache:
             print("Using cached BLIP embeddings")
             # expand to batch size
             ctx_embeddings = self.ctx_embeddings_cache.expand(
