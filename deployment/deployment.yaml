@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blip-diffusion-backend
+  namespace: sfr-ns-li-d
+  labels:
+    app: blip-diffusion-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      # app: blip2-gradio-server-a100-docker
+      app: blip-diffusion-backend
+  template:
+    metadata:
+      labels:
+        # app: blip2-gradio-server-a100-docker
+        app: blip-diffusion-backend
+    spec:
+      volumes:
+        - name: sfr-home-pv-li-d
+          persistentVolumeClaim:
+            claimName: sfr-home-pvc-li-d
+        - name: sfr-share-pv-li-d
+          persistentVolumeClaim:
+            claimName: sfr-share-pvc-li-d
+        - name: dshm
+          emptyDir:
+            medium: Memory
+      containers:
+        - name: blip-diffusion-backend
+          image: "gcr.io/salesforce-research-internal/blip-diffusion-demo:latest"
+          command: # ["python app.py >> file.txt 2>&1"]
+            - /bin/bash
+            - -c
+            - ./entrypoint.sh
+            # - sleep infinity
+          ports:
+            - containerPort: 8501
+          resources:
+            limits:
+              nvidia.com/gpu: 2
+              cpu: "23"
+              memory: 150G
+              # nvidia.com/gpu: 4
+              # cpu: "47"
+              # memory: 300G
+          volumeMounts:
+            - name: sfr-home-pv-li-d
+              mountPath: "/export/home"
+            - name: sfr-share-pv-li-d
+              mountPath: "/export/share"
+            - name: dshm
+              mountPath: /dev/shm
+      nodeSelector: 
+        cloud.google.com/gke-accelerator: nvidia-tesla-a100
+      tolerations:
+        - key: "gpu_num"
+          operator: "Equal"
+          value: "2"
+          effect: "NoSchedule"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  # name: blip2-gradio-service
+  name: blip-diffusion-backend
+  namespace: sfr-ns-li-d
+spec:
+  type: LoadBalancer
+  selector:
+    # app: blip2-gradio-server-a100-docker
+    app: blip-diffusion-backend
+  ports:
+    # - name: blip2-gradio-server-a100-docker
+    - name: blip-diffusion-backend
+      port: 8501
+      targetPort: 8501
